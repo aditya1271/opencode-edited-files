@@ -84,6 +84,36 @@ export const EditedFiles = Rpc.define({
         additionalProperties: false,
       },
     },
+    /** Lets other plugins report files they changed without an edit tool. */
+    track: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+          files: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                path: { type: "string" },
+                /** Content before the change; omit when the file did not exist. */
+                before: { type: "string" },
+              },
+              required: ["path"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["sessionID", "files"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: { ok: { type: "boolean" } },
+        required: ["ok"],
+        additionalProperties: false,
+      },
+    },
   },
   events: {
     changed: {
@@ -125,6 +155,12 @@ export interface EditedFile {
   updated: number
   /** Marked as reviewed, with no edit since: no newer tracked edit and unchanged content. */
   reviewed: boolean
+}
+
+export interface TrackInput {
+  sessionID: string
+  /** Absolute paths; `before` is the content before the change, omitted for a new file. */
+  files: { path: string; before?: string }[]
 }
 
 export interface ReviewInput {

@@ -4,7 +4,7 @@ import { createHash, randomUUID } from "node:crypto"
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
-import { EditedFiles, type EditedFile, type ReviewInput } from "./rpc.ts"
+import { EditedFiles, type EditedFile, type ReviewInput, type TrackInput } from "./rpc.ts"
 
 const NULL_DEVICE = "/dev/null"
 const EDIT_TOOLS = new Set(["edit", "write", "patch"])
@@ -219,6 +219,20 @@ export default Plugin.define({
       }
     }
 
+    /** Backup from given content (for `track`), or /dev/null when the file did not exist. */
+    const backupContent = async (sessionID: string, file: string, content: string | undefined) => {
+      if (content === undefined) return NULL_DEVICE
+      const dir = sessionBackups(sessionID)
+      const target = path.join(dir, `${randomUUID().slice(0, 8)}-${path.basename(file)}`)
+      try {
+        await mkdir(dir, { recursive: true, mode: 0o700 })
+        await writeFile(target, content, { mode: 0o600 })
+        return target
+      } catch {
+        return NULL_DEVICE
+      }
+    }
+
     const hashCache = new Map<string, { version: string; hash: string }>()
     const contentHash = async (file: string) => {
       const info = await fileInfo(file)
@@ -340,6 +354,22 @@ export default Plugin.define({
         await registration.events.emit("changed", { sessionID })
         return { ok: true }
       },
+      track: async (input) => {
+        const { sessionID, files } = input as TrackInput
+        const directory = await sessionDirectory(sessionID)
+        const state = await stateOf(sessionID)
+        const planned: Planned[] = []
+        for (const { path: file, before } of files) {
+          const target = path.resolve(directory, file)
+          const tracked = state.files.get(target)
+          if (!tracked) planned.push({ from: target, to: target, first: await backupContent(sessionID, target, before) })
+          else if (tracked.turn !== state.turn)
+            planned.push({ from: target, to: target, turn: await backupContent(sessionID, target, before) })
+          else planned.push({ from: target, to: target })
+        }
+        if (planned.length) await apply(sessionID, planned)
+        return { ok: true }
+      },
     })
 
     await ctx.tool.hook("execute.before", async (event) => {
@@ -372,9 +402,14 @@ export default Plugin.define({
         return
       }
 
-      const state = await stateOf(call.sessionID)
+      await apply(call.sessionID, call.planned)
+    })
+
+    /** Records a successful change of the planned files. */
+    async function apply(sessionID: string, planned: Planned[]) {
+      const state = await stateOf(sessionID)
       const now = Date.now()
-      for (const plan of call.planned) {
+      for (const plan of planned) {
         let tracked = state.files.get(plan.from)
         if (!tracked) {
           const before = plan.first ?? NULL_DEVICE
@@ -398,9 +433,9 @@ export default Plugin.define({
         }
         state.files.set(plan.to, tracked)
       }
-      await save(call.sessionID, state)
-      await registration.events.emit("changed", { sessionID: call.sessionID })
-    })
+      await save(sessionID, state)
+      await registration.events.emit("changed", { sessionID })
+    }
 
     const forget = async (sessionID: string) => {
       sessions.delete(sessionID)

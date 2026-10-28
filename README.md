@@ -207,7 +207,9 @@ Sidebar preferences (collapsed, view, show all) use OpenCode's plugin storage.
 ## Limitations
 
 - Only edits made through OpenCode's `edit`, `write` and `patch` tools are tracked. Changes made by shell commands
-  (`sed`, `mv`, formatters run via shell) are not.
+  (`sed`, `mv`, formatters run via shell) are not. Other plugins that write files themselves can report them with
+  the `track` RPC method: `ctx.rpc(EditedFiles).track({ sessionID, files: [{ path, before }] })`, where `before` is
+  the old content and is omitted for a new file (see `src/rpc.ts`).
 - `+/-` counts use the system `diff` command.
 - If you remove backup files by hand, the affected diffs and counts are wrong.
 
