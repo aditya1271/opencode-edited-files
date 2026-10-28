@@ -15,6 +15,7 @@ const editedFile = {
     binary: { type: "boolean" },
     edits: { type: "number" },
     updated: { type: "number" },
+    reviewed: { type: "boolean" },
   },
   required: [
     "path",
@@ -29,6 +30,7 @@ const editedFile = {
     "binary",
     "edits",
     "updated",
+    "reviewed",
   ],
   additionalProperties: false,
 } as const
@@ -47,6 +49,25 @@ export const EditedFiles = Rpc.define({
         type: "object",
         properties: { files: { type: "array", items: editedFile } },
         required: ["files"],
+        additionalProperties: false,
+      },
+    },
+    review: {
+      input: {
+        type: "object",
+        properties: {
+          sessionID: { type: "string" },
+          path: { type: "string" },
+          updated: { type: "number" },
+          reviewed: { type: "boolean" },
+        },
+        required: ["sessionID", "path", "updated", "reviewed"],
+        additionalProperties: false,
+      },
+      output: {
+        type: "object",
+        properties: { ok: { type: "boolean" } },
+        required: ["ok"],
         additionalProperties: false,
       },
     },
@@ -84,4 +105,15 @@ export interface EditedFile {
   edits: number
   /** Last edit time (epoch ms). */
   updated: number
+  /** Marked as reviewed, and not edited since. */
+  reviewed: boolean
+}
+
+export interface ReviewInput {
+  /** Session that stores the mark (the root of the family). */
+  sessionID: string
+  path: string
+  /** The file's `updated` value the user reviewed; a later edit clears the mark. */
+  updated: number
+  reviewed: boolean
 }

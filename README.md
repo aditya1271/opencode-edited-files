@@ -4,13 +4,14 @@ An [OpenCode](https://opencode.ai) V2 plugin that lists every file a session has
 Subagents, with `+/-` line counts and one-click diffs in VS Code.
 
 ```
-▼ Edited Files 4 +31 -10
+▼ Edited Files 3 +49 -21
 view: whole session | last turn
+✓ 1 reviewed hidden · show
 src/
-  M tui.tsx +19 -11
-  M index.ts +28 -10
+  ○ M tui.tsx +19 -11
+  ○ M index.ts +28 -10
 docs/
-  A usage.md +2 -0
+  ○ A usage.md +2 -0
 ```
 
 ## Features
@@ -22,8 +23,11 @@ docs/
   - **last turn**: only files edited since your latest prompt, compared with how they were before that turn.
 - **Grouped by folder**, 10 rows by default with a `show all / show less` toggle. Click the header to collapse.
 - **Click a file to open its diff** in VS Code (`code --diff`). Diffs never open automatically.
+- **Mark files as reviewed** by clicking the `○` in front of a file, which turns into `✓`. Reviewed files are hidden
+  by default; click `N reviewed hidden · show` to show them again, dimmed. If the file is edited again after you
+  reviewed it, the mark clears and the file reappears, so new changes are never hidden.
 - **`/edits` picker** with every file, grouped by folder and searchable. `Ctrl+A` opens all diffs (asks first above
-  10), `Ctrl+T` switches the view.
+  10), `Ctrl+R` marks the selected file reviewed or not reviewed, and `Ctrl+T` switches the view.
 - **Persistent**: the edit list and "before" copies survive restarts and are removed when the session is deleted.
 
 ## Install
@@ -161,8 +165,9 @@ Added and deleted files are compared against an empty placeholder named `<file> 
 
 | Command | Description |
 | --- | --- |
-| `/edits` | Pick a file to open its diff. `Ctrl+A` opens all, `Ctrl+T` switches the view. |
+| `/edits` | Pick a file to open its diff. `Ctrl+A` opens all, `Ctrl+R` toggles reviewed, `Ctrl+T` switches the view. |
 | `/edits-view` | Switch between **whole session** and **last turn**. |
+| `/edits-reviewed` | Show or hide reviewed files. |
 
 Both are also in the command palette under **Edited files**.
 
@@ -171,7 +176,7 @@ Both are also in the command palette under **Edited files**.
 State lives in `$XDG_STATE_HOME/opencode-edited-files/` (default `~/.local/state/opencode-edited-files/`), readable only
 by you:
 
-- `sessions/<sessionID>.json`: edited files, timestamps and turn tracking.
+- `sessions/<sessionID>.json`: edited files, timestamps, turn tracking and review marks.
 - `backups/<sessionID>/`: a copy of each file from before the session first edited it, plus one from before the latest
   turn that edited it. Older per-turn copies are replaced.
 

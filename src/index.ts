@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto"
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
-import { EditedFiles, type EditedFile } from "./rpc.ts"
+import { EditedFiles, type EditedFile, type ReviewInput } from "./rpc.ts"
 
 const NULL_DEVICE = "/dev/null"
 const EDIT_TOOLS = new Set(["edit", "write", "patch"])
@@ -28,6 +28,8 @@ interface Tracked {
 interface SessionState {
   turn: number
   files: Map<string, Tracked>
+  /** Path -> the `updated` value that was reviewed. */
+  reviewed: Map<string, number>
 }
 
 /** Snapshot decision made before a tool runs; applied once it succeeds. */
@@ -138,10 +140,18 @@ export default Plugin.define({
 
     const load = async (sessionID: string): Promise<SessionState> => {
       try {
-        const raw = JSON.parse(await readFile(stateFile(sessionID), "utf8")) as { turn: number; files: Tracked[] }
-        return { turn: raw.turn ?? 0, files: new Map(raw.files.map((file) => [file.path, file])) }
+        const raw = JSON.parse(await readFile(stateFile(sessionID), "utf8")) as {
+          turn: number
+          files: Tracked[]
+          reviewed?: Record<string, number>
+        }
+        return {
+          turn: raw.turn ?? 0,
+          files: new Map(raw.files.map((file) => [file.path, file])),
+          reviewed: new Map(Object.entries(raw.reviewed ?? {})),
+        }
       } catch {
-        return { turn: 0, files: new Map() }
+        return { turn: 0, files: new Map(), reviewed: new Map() }
       }
     }
 
@@ -155,7 +165,12 @@ export default Plugin.define({
       const file = stateFile(sessionID)
       const temp = `${file}.${randomUUID().slice(0, 8)}.tmp`
       try {
-        await writeFile(temp, JSON.stringify({ turn: state.turn, files: [...state.files.values()] }), { mode: 0o600 })
+        const data = {
+          turn: state.turn,
+          files: [...state.files.values()],
+          reviewed: Object.fromEntries(state.reviewed),
+        }
+        await writeFile(temp, JSON.stringify(data), { mode: 0o600 })
         await rename(temp, file)
       } catch (error) {
         void removeQuietly(temp)
@@ -199,8 +214,11 @@ export default Plugin.define({
         const { sessionIDs } = input as { sessionIDs: string[] }
         // Merge the family: earliest session baseline, latest turn baseline per path.
         const merged = new Map<string, Tracked>()
+        const reviewedAt = new Map<string, number>()
         for (const sessionID of sessionIDs) {
-          for (const file of (await stateOf(sessionID)).files.values()) {
+          const state = await stateOf(sessionID)
+          for (const [file, at] of state.reviewed) reviewedAt.set(file, Math.max(at, reviewedAt.get(file) ?? 0))
+          for (const file of state.files.values()) {
             const seen = merged.get(file.path)
             if (!seen) {
               merged.set(file.path, { ...file })
@@ -249,10 +267,20 @@ export default Plugin.define({
             binary: stats.binary,
             edits: file.edits,
             updated: file.updated,
+            reviewed: (reviewedAt.get(file.path) ?? -1) >= file.updated,
           })
         }
         files.sort((a, b) => b.updated - a.updated)
         return { files }
+      },
+      review: async (input) => {
+        const { sessionID, path: file, updated, reviewed } = input as ReviewInput
+        const state = await stateOf(sessionID)
+        if (reviewed) state.reviewed.set(file, updated)
+        else state.reviewed.delete(file)
+        await save(sessionID, state)
+        await registration.events.emit("changed", { sessionID })
+        return { ok: true }
       },
     })
 

@@ -13,6 +13,7 @@ interface Prefs {
   expanded: boolean
   baseline: View
   showAll?: boolean
+  showReviewed?: boolean
 }
 
 interface Group {
@@ -95,19 +96,40 @@ export default Plugin.define({
       return start
     }
 
+    const rootOf = (sessionID: string) => context.data.session.root(sessionID) ?? sessionID
+    const rpcOptions = (sessionID: string) => {
+      const directory = sessionDirectory(sessionID)
+      return directory ? { location: { directory } } : undefined
+    }
+
     const fetchFiles = async (sessionID: string): Promise<EditedFile[]> => {
       const family = context.data.session.family(sessionID)
-      const sessionIDs = [...new Set([sessionID, ...family])]
-      const directory = sessionDirectory(sessionID)
-      const result = await rpc.list({ sessionIDs }, directory ? { location: { directory } } : undefined)
+      const sessionIDs = [...new Set([sessionID, rootOf(sessionID), ...family])]
+      const result = await rpc.list({ sessionIDs }, rpcOptions(sessionID))
       return (result as { files: EditedFile[] }).files
     }
 
-    const applyScope = (files: EditedFile[], sessionID: string) => {
+    /** Review marks live on the root session, so the whole family shares them. */
+    const setReviewed = async (sessionID: string, file: EditedFile, reviewed: boolean) => {
+      try {
+        await rpc.review(
+          { sessionID: rootOf(sessionID), path: file.path, updated: file.updated, reviewed },
+          rpcOptions(sessionID),
+        )
+      } catch {
+        context.ui.toast.show({ title: "Edited files", message: "Could not update the review mark", variant: "error" })
+      }
+    }
+
+    /** Files that belong to the current view (whole session, or only the last turn). */
+    const inView = (files: EditedFile[], sessionID: string) => {
       if (prefs.baseline !== "turn") return files
       const start = lastTurnStart(sessionID)
       return files.filter((file) => file.updated >= start)
     }
+
+    const withoutHiddenReviewed = (files: EditedFile[]) =>
+      prefs.showReviewed ? files : files.filter((file) => !file.reviewed)
 
     const displayPath = (file: EditedFile, sessionID: string) => {
       const base = sessionDirectory(sessionID)
@@ -130,6 +152,10 @@ export default Plugin.define({
     const toggleView = () =>
       setPrefs((draft) => {
         draft.baseline = draft.baseline === "session" ? "turn" : "session"
+      }).catch(() => {})
+    const toggleShowReviewed = () =>
+      setPrefs((draft) => {
+        draft.showReviewed = !draft.showReviewed
       }).catch(() => {})
 
     const spawnDiffs = (files: EditedFile[]) => {
@@ -192,11 +218,17 @@ export default Plugin.define({
     const showPicker = async () => {
       const sessionID = currentSessionID()
       if (!sessionID) return
-      const files = applyScope(await fetchFiles(sessionID).catch(() => [] as EditedFile[]), sessionID)
+      const all = inView(await fetchFiles(sessionID).catch(() => [] as EditedFile[]), sessionID)
+      const files = withoutHiddenReviewed(all)
       if (files.length === 0) {
         context.ui.toast.show({
           title: "Edited files",
-          message: prefs.baseline === "turn" ? "No files edited in the last turn." : "No files edited in this session yet.",
+          message:
+            all.length > 0
+              ? "All files are reviewed. Use /edits-reviewed to show them."
+              : prefs.baseline === "turn"
+                ? "No files edited in the last turn."
+                : "No files edited in this session yet.",
         })
         return
       }
@@ -204,14 +236,27 @@ export default Plugin.define({
         title: `Edited files · ${viewLabel()}`,
         options: groupByDir(files, sessionID).flatMap((group) =>
           group.files.map((file) => ({
-            title: `${STATUS_MARK[file.status]} ${path.basename(file.path)}`,
+            title: `${file.reviewed ? "✓" : STATUS_MARK[file.status]} ${path.basename(file.path)}`,
             value: file.path,
             category: group.dir === "." ? "./" : group.dir,
-            description: file.binary ? "binary" : `+${countsOf(file).add} -${countsOf(file).del}`,
+            description:
+              (file.binary ? "binary" : `+${countsOf(file).add} -${countsOf(file).del}`) +
+              (file.reviewed ? " · reviewed" : ""),
           })),
         ),
         actions: [
           { bind: "ctrl+a", title: "Open all", selection: "none", onTrigger: () => void openDiffs(files) },
+          {
+            bind: "ctrl+r",
+            title: "Mark reviewed",
+            onTrigger: async (value: unknown) => {
+              const file = files.find((f) => f.path === value)
+              if (!file) return
+              await setReviewed(sessionID, file, !file.reviewed)
+              context.ui.dialog.clear()
+              void showPicker()
+            },
+          },
           {
             bind: "ctrl+t",
             title: "Switch view",
@@ -248,6 +293,14 @@ export default Plugin.define({
           slash: { name: "edits-view" },
           run: () => void toggleView(),
         },
+        {
+          id: "edited-files.reviewed",
+          title: "Edited files: show/hide reviewed files",
+          group: "Edited files",
+          palette: true,
+          slash: { name: "edits-reviewed" },
+          run: () => void toggleShowReviewed(),
+        },
       ],
     }))
 
@@ -267,8 +320,10 @@ export default Plugin.define({
 
     function FileRow(props: { file: EditedFile; sessionID: string }) {
       const [hover, setHover] = createSignal(false)
+      const [markHover, setMarkHover] = createSignal(false)
       const stats = () => (props.file.binary ? " bin" : ` +${countsOf(props.file).add} -${countsOf(props.file).del}`)
-      const label = () => truncateLeft(path.basename(props.file.path), SIDEBAR_WIDTH - 6 - stats().length)
+      const label = () => truncateLeft(path.basename(props.file.path), SIDEBAR_WIDTH - 8 - stats().length)
+      const dim = () => props.file.reviewed
       return (
         <box
           flexDirection="row"
@@ -280,9 +335,21 @@ export default Plugin.define({
             void openDiffs([props.file])
           }}
         >
-          <text fg={statusColor(props.file)}>{`${STATUS_MARK[props.file.status]} `}</text>
-          <text fg={hover() ? color.accent() : color.header()}>{label()}</text>
-          <Show when={!props.file.binary} fallback={<text fg={color.muted()}>{stats()}</text>}>
+          <box
+            onMouseOver={() => setMarkHover(true)}
+            onMouseOut={() => setMarkHover(false)}
+            onMouseUp={(event: { stopPropagation(): void }) => {
+              event.stopPropagation()
+              void setReviewed(props.sessionID, props.file, !props.file.reviewed)
+            }}
+          >
+            <text fg={markHover() ? color.accent() : props.file.reviewed ? color.added() : color.muted()}>
+              {props.file.reviewed ? "✓ " : "○ "}
+            </text>
+          </box>
+          <text fg={dim() ? color.muted() : statusColor(props.file)}>{`${STATUS_MARK[props.file.status]} `}</text>
+          <text fg={hover() && !markHover() ? color.accent() : dim() ? color.muted() : color.header()}>{label()}</text>
+          <Show when={!props.file.binary && !dim()} fallback={<text fg={color.muted()}>{stats()}</text>}>
             <text fg={color.added()}>{` +${countsOf(props.file).add}`}</text>
             <text fg={color.removed()}>{` -${countsOf(props.file).del}`}</text>
           </Show>
@@ -327,7 +394,9 @@ export default Plugin.define({
         stopRevert()
       })
 
-      const scoped = createMemo(() => applyScope(files(), props.sessionID))
+      const inViewFiles = createMemo(() => inView(files(), props.sessionID))
+      const reviewedCount = () => inViewFiles().filter((file) => file.reviewed).length
+      const scoped = createMemo(() => withoutHiddenReviewed(inViewFiles()))
       const visible = createMemo(() => (prefs.showAll ? scoped() : scoped().slice(0, COMPACT_ROWS)))
       const groups = createMemo(() => groupByDir(visible(), props.sessionID))
       const totals = () =>
@@ -356,8 +425,17 @@ export default Plugin.define({
               <text fg={color.muted()}>{" | "}</text>
               <text fg={prefs.baseline === "turn" ? color.accent() : color.muted()}>{"last turn"}</text>
             </Clickable>
+            <Show when={reviewedCount() > 0}>
+              <Clickable onClick={() => void toggleShowReviewed()}>
+                <text fg={color.added()}>{"✓ "}</text>
+                <text fg={color.muted()}>{`${reviewedCount()} reviewed${prefs.showReviewed ? "" : " hidden"} · `}</text>
+                <text fg={color.accent()}>{prefs.showReviewed ? "hide" : "show"}</text>
+              </Clickable>
+            </Show>
             <Show when={scoped().length === 0}>
-              <text fg={color.muted()}>{"  no files edited in the last turn"}</text>
+              <text fg={color.muted()}>
+                {inViewFiles().length > 0 ? "  all files reviewed" : "  no files edited in the last turn"}
+              </text>
             </Show>
             <For each={groups()}>
               {(group) => (
