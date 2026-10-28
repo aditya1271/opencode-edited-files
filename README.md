@@ -28,17 +28,62 @@ docs/
 
 ## Install
 
-Add the package to `plugins` in `~/.config/opencode/opencode.json` (or a project `opencode.json`). One entry loads both
-the server part and the sidebar:
+You only need to edit one config file. Choose **one** of the two options below.
 
-```jsonc
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugins": ["opencode-edited-files"]
-}
-```
+### Option 1: from npm (recommended, no cloning)
 
-To use another editor CLI that supports `--diff <left> <right>` (for example Cursor or VS Code Insiders):
+1. Open your global OpenCode config, `~/.config/opencode/opencode.json`. Create it if it does not exist. To enable the
+   plugin for a single project only, use `opencode.json` in that project's folder instead.
+2. Add `"opencode-edited-files"` to the `plugins` array:
+
+   ```jsonc
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "plugins": ["opencode-edited-files"]
+   }
+   ```
+
+   If the file already has other settings or plugins, keep them and only add this entry to the array.
+3. Save the file. OpenCode downloads the package from npm and loads it automatically. You do not need to run
+   `npm install`, clone anything or restart OpenCode. If it does not appear, run `/reload` in OpenCode.
+
+To pin a version, use `"opencode-edited-files@0.1.0"`.
+
+### Option 2: from a GitHub clone
+
+Use this to run the latest unreleased code or to modify the plugin.
+
+1. Clone the repository anywhere:
+
+   ```sh
+   git clone https://github.com/aditya1271/opencode-edited-files.git ~/opencode-edited-files
+   ```
+
+2. Add the **absolute path** of the clone to `plugins` in `~/.config/opencode/opencode.json`:
+
+   ```jsonc
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "plugins": ["/home/<you>/opencode-edited-files"]
+   }
+   ```
+
+3. Save the file. OpenCode loads the TypeScript source directly, so you do not need `npm install` or a build step.
+
+To update, run `git pull` in the clone.
+
+### Check that it works
+
+Open a session and look at the sidebar. A section titled **Edited Files · none yet** should appear. Ask OpenCode to
+edit a file, and the file appears in the list with its `+/-` counts. Typing `/edits` should open the picker.
+
+Only use one copy: do not use both options at once or alongside another copy of the editor-diff plugin, or the
+section appears twice.
+
+### Choose a different editor (optional)
+
+Diffs open with `code --diff` by default. To use another editor CLI that supports `--diff <left> <right>`, such as
+Cursor or VS Code Insiders, replace the plain entry with an object:
 
 ```jsonc
 {
@@ -47,6 +92,11 @@ To use another editor CLI that supports `--diff <left> <right>` (for example Cur
 ```
 
 The editor is chosen from the `editor` option, then the `OPENCODE_DIFF_EDITOR` environment variable, then `code`.
+
+### Uninstall
+
+Remove the entry from `plugins` and save. To delete the saved edit history too, remove
+`~/.local/state/opencode-edited-files/`.
 
 ## Opening diffs
 
