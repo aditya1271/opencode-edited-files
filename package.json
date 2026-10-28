@@ -5,6 +5,14 @@
   "type": "module",
   "license": "MIT",
   "author": "Aditya Aggarwal",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aditya1271/opencode-edited-files.git"
+  },
+  "homepage": "https://github.com/aditya1271/opencode-edited-files#readme",
+  "bugs": {
+    "url": "https://github.com/aditya1271/opencode-edited-files/issues"
+  },
   "keywords": [
     "opencode",
     "opencode-plugin",
