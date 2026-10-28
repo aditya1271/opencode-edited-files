@@ -1,0 +1,49 @@
+{
+  "name": "opencode-edited-files",
+  "version": "0.1.0",
+  "description": "OpenCode V2 plugin: sidebar of every file a session edited, with +/- counts and one-click VS Code diffs",
+  "type": "module",
+  "license": "MIT",
+  "author": "Aditya Aggarwal",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "plugin",
+    "diff",
+    "vscode",
+    "sidebar"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./tui": "./src/tui.tsx",
+    "./rpc": "./src/rpc.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p ."
+  },
+  "peerDependencies": {
+    "@opencode/plugin": ">=2.2.0 <3",
+    "@opentui/core": ">=0.6.6 <1",
+    "@opentui/solid": ">=0.6.6 <1",
+    "solid-js": ">=1.9.0 <2"
+  },
+  "peerDependenciesMeta": {
+    "@opencode/plugin": { "optional": true },
+    "@opentui/core": { "optional": true },
+    "@opentui/solid": { "optional": true },
+    "solid-js": { "optional": true }
+  },
+  "devDependencies": {
+    "@opencode/plugin": "2.2.0",
+    "@opentui/core": "^0.7.0",
+    "@opentui/solid": "^0.7.0",
+    "@types/node": "^22.0.0",
+    "solid-js": "^1.9.0",
+    "typescript": "^5.6.0"
+  }
+}
