@@ -139,7 +139,10 @@ export default Plugin.define({
         message: `${marking ? "Marked" : "Unmarked"} ${targets.length} file${targets.length === 1 ? "" : "s"} as reviewed`,
       })
     }
-    const reviewAllLabel = (files: EditedFile[]) => (files.some((file) => !file.reviewed) ? "review all" : "unreview all")
+    const reviewAllLabel = (files: EditedFile[]) => {
+      if (!files.some((file) => !file.reviewed)) return "unmark all"
+      return files.some((file) => file.reviewed) ? "mark all" : "mark all as reviewed"
+    }
 
     /** Files that belong to the current view (whole session, or only the last turn). */
     const inView = (files: EditedFile[], sessionID: string) => {
@@ -279,7 +282,7 @@ export default Plugin.define({
           },
           {
             bind: "ctrl+e",
-            title: all.some((file) => !file.reviewed) ? "Review all" : "Unreview all",
+            title: all.some((file) => !file.reviewed) ? "Mark all reviewed" : "Unmark all",
             selection: "none",
             onTrigger: async () => {
               await reviewAll(sessionID, all)
@@ -478,10 +481,7 @@ export default Plugin.define({
             </Clickable>
             <Show when={inViewFiles().length > 0}>
               <box flexDirection="row">
-                <Show
-                  when={reviewedCount() > 0}
-                  fallback={<text fg={color.muted()}>{"○ "}</text>}
-                >
+                <Show when={reviewedCount() > 0}>
                   <text fg={color.added()}>{"✓ "}</text>
                   <text fg={color.muted()}>{`${reviewedCount()} reviewed · `}</text>
                   <Clickable onClick={() => void toggleShowReviewed()}>
