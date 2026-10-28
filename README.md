@@ -28,13 +28,69 @@ docs/
 
 ## Install
 
-You only need to edit one config file. Choose **one** of the two options below.
+OpenCode loads plugins listed in the `plugins` array of its config file. An entry can be either a **folder path**,
+which OpenCode loads from disk, or an **npm package name**, which OpenCode downloads from npmjs.com. OpenCode does not
+download plugins from GitHub URLs, so to use the GitHub code you clone it and give OpenCode the folder path.
 
-### Option 1: from npm (recommended, no cloning)
+Use **one** of the methods below, not both.
 
-1. Open your global OpenCode config, `~/.config/opencode/opencode.json`. Create it if it does not exist. To enable the
-   plugin for a single project only, use `opencode.json` in that project's folder instead.
-2. Add `"opencode-edited-files"` to the `plugins` array:
+### Method A: clone from GitHub
+
+1. Clone the repository. Any folder works; this example uses your home folder:
+
+   ```sh
+   git clone https://github.com/aditya1271/opencode-edited-files.git ~/opencode-edited-files
+   ```
+
+2. Get the full path of the clone; you need it in the next step:
+
+   ```sh
+   cd ~/opencode-edited-files
+   pwd
+   ```
+
+   This prints something like `/home/alice/opencode-edited-files`.
+
+3. Open the global OpenCode config, `~/.config/opencode/opencode.json`. Create the file if it does not exist.
+
+4. Add the path from step 2 to the `plugins` array. Use the full path; `~` is not expanded here.
+
+   If the file is new or has no `plugins` entry yet:
+
+   ```jsonc
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "plugins": ["/home/alice/opencode-edited-files"]
+   }
+   ```
+
+   If it already has a `plugins` array, add the path to it and keep the existing entries:
+
+   ```jsonc
+   "plugins": ["some-other-plugin", "/home/alice/opencode-edited-files"]
+   ```
+
+5. Save the file. OpenCode notices the change and loads the plugin. You do not need `npm install`, a build step or a
+   restart, because OpenCode runs the TypeScript source directly. If the sidebar section does not appear, type
+   `/reload` in OpenCode.
+
+To update later:
+
+```sh
+cd ~/opencode-edited-files
+git pull
+```
+
+OpenCode reloads the plugin automatically when its files change.
+
+### Method B: from npm
+
+This works only once the package is published on npm. Check
+[npmjs.com/package/opencode-edited-files](https://www.npmjs.com/package/opencode-edited-files): if that page shows
+"not found", use Method A.
+
+1. Open `~/.config/opencode/opencode.json` (create it if needed).
+2. Add the package name to `plugins`:
 
    ```jsonc
    {
@@ -43,60 +99,54 @@ You only need to edit one config file. Choose **one** of the two options below.
    }
    ```
 
-   If the file already has other settings or plugins, keep them and only add this entry to the array.
-3. Save the file. OpenCode downloads the package from npm and loads it automatically. You do not need to run
-   `npm install`, clone anything or restart OpenCode. If it does not appear, run `/reload` in OpenCode.
+3. Save the file. OpenCode downloads the package and loads it. No cloning or `npm install` is needed.
 
 To pin a version, use `"opencode-edited-files@0.1.0"`.
 
-### Option 2: from a GitHub clone
-
-Use this to run the latest unreleased code or to modify the plugin.
-
-1. Clone the repository anywhere:
-
-   ```sh
-   git clone https://github.com/aditya1271/opencode-edited-files.git ~/opencode-edited-files
-   ```
-
-2. Add the **absolute path** of the clone to `plugins` in `~/.config/opencode/opencode.json`:
-
-   ```jsonc
-   {
-     "$schema": "https://opencode.ai/config.json",
-     "plugins": ["/home/<you>/opencode-edited-files"]
-   }
-   ```
-
-3. Save the file. OpenCode loads the TypeScript source directly, so you do not need `npm install` or a build step.
-
-To update, run `git pull` in the clone.
-
 ### Check that it works
 
-Open a session and look at the sidebar. A section titled **Edited Files · none yet** should appear. Ask OpenCode to
-edit a file, and the file appears in the list with its `+/-` counts. Typing `/edits` should open the picker.
+1. Open or start a session in OpenCode.
+2. Look at the sidebar. You should see a section **Edited Files · none yet**. If the sidebar is hidden,
+   widen the terminal or toggle the sidebar.
+3. Ask OpenCode to edit any file. The file appears in the section with green/red `+/-` counts.
+4. Type `/edits` to open the file picker.
 
-Only use one copy: do not use both options at once or alongside another copy of the editor-diff plugin, or the
-section appears twice.
+If the section appears **twice**, the plugin is loaded more than once. Keep only one entry for it in `plugins`, and
+remove any other copy of the editor-diff plugin from `~/.config/opencode/plugins/`.
+
+If it does not appear at all, check `~/.local/share/opencode/log/opencode.log` for lines containing
+`edited-files`.
+
+### Per-project install (optional)
+
+To enable the plugin for one project only, put the same `plugins` entry in an `opencode.json` file in that project's
+folder instead of the global config.
 
 ### Choose a different editor (optional)
 
 Diffs open with `code --diff` by default. To use another editor CLI that supports `--diff <left> <right>`, such as
-Cursor or VS Code Insiders, replace the plain entry with an object:
+`cursor` or `code-insiders`, either:
 
-```jsonc
-{
+- set the environment variable before starting OpenCode, which works with both methods:
+
+  ```sh
+  export OPENCODE_DIFF_EDITOR=cursor        # bash/zsh
+  setenv OPENCODE_DIFF_EDITOR cursor        # csh/tcsh
+  ```
+
+- or, with Method B, replace the plain entry with an object:
+
+  ```jsonc
   "plugins": [{ "package": "opencode-edited-files", "options": { "editor": "cursor" } }]
-}
-```
+  ```
 
-The editor is chosen from the `editor` option, then the `OPENCODE_DIFF_EDITOR` environment variable, then `code`.
+The `editor` option takes priority, then `OPENCODE_DIFF_EDITOR`, then `code`.
 
 ### Uninstall
 
-Remove the entry from `plugins` and save. To delete the saved edit history too, remove
-`~/.local/state/opencode-edited-files/`.
+1. Remove the entry from `plugins` and save.
+2. Optionally delete the clone folder (Method A) and the saved edit history in
+   `~/.local/state/opencode-edited-files/`.
 
 ## Opening diffs
 
