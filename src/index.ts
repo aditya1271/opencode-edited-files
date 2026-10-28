@@ -37,6 +37,10 @@ interface ReviewMark {
   updated: number
   /** SHA-256 of the content when it was marked, or "gone" for a deleted file. */
   hash: string
+  /** Copy of the file when it was marked: the baseline for the "since review" view. */
+  snapshot?: string
+  /** Set once the file changed after being marked; the mark stays only as a diff baseline. */
+  stale?: boolean
 }
 
 /** Snapshot decision made before a tool runs; applied once it succeeds. */
@@ -265,14 +269,13 @@ export default Plugin.define({
           }
         }
 
-        /** Checks a mark; a mark the file has outgrown is deleted for good. */
+        /** Checks a mark; once the file outgrows it, it is stale for good (kept only as a diff baseline). */
         const stale = new Set<string>()
         const isReviewed = async (file: Tracked) => {
           const entry = marks.get(file.path)
-          if (!entry) return false
+          if (!entry || entry.mark.stale) return false
           if (entry.mark.updated >= file.updated && entry.mark.hash === (await contentHash(file.path))) return true
-          const state = await stateOf(entry.sessionID)
-          state.reviewed.delete(file.path)
+          entry.mark.stale = true
           stale.add(entry.sessionID)
           return false
         }
@@ -293,8 +296,11 @@ export default Plugin.define({
             }
             return cached
           }
+          const reviewed = await isReviewed(file)
+          const reviewBefore = marks.get(file.path)?.mark.snapshot ?? file.sessionBefore
           const stats = await statsFor(file.sessionBefore)
           const turnStats = file.turnBefore === file.sessionBefore ? stats : await statsFor(file.turnBefore)
+          const reviewStats = reviewBefore === file.sessionBefore ? stats : await statsFor(reviewBefore)
           files.push({
             path: file.path,
             status: file.sessionBefore === NULL_DEVICE ? "added" : info ? "modified" : "deleted",
@@ -305,10 +311,13 @@ export default Plugin.define({
             deletions: stats.deletions,
             turnAdditions: turnStats.additions,
             turnDeletions: turnStats.deletions,
+            reviewBefore,
+            reviewAdditions: reviewStats.additions,
+            reviewDeletions: reviewStats.deletions,
             binary: stats.binary,
             edits: file.edits,
             updated: file.updated,
-            reviewed: await isReviewed(file),
+            reviewed,
           })
         }
         for (const sessionID of stale) await save(sessionID, await stateOf(sessionID))
@@ -319,8 +328,13 @@ export default Plugin.define({
         const { sessionID, files, reviewed } = input as ReviewInput
         const state = await stateOf(sessionID)
         for (const { path: file, updated } of files) {
-          if (reviewed) state.reviewed.set(file, { updated, hash: await contentHash(file) })
-          else state.reviewed.delete(file)
+          discard(state.reviewed.get(file)?.snapshot)
+          if (reviewed) {
+            const snapshot = await backup(sessionID, file)
+            state.reviewed.set(file, { updated, hash: await contentHash(file), snapshot })
+          } else {
+            state.reviewed.delete(file)
+          }
         }
         await save(sessionID, state)
         await registration.events.emit("changed", { sessionID })

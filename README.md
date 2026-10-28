@@ -5,7 +5,7 @@ Subagents, with `+/-` line counts and one-click diffs in VS Code.
 
 ```
 ▼ Edited Files 3 +49 -21
-View: Whole session | Last turn
+Session | Last turn | Since review
 ✓ 1 reviewed · Show · Mark all
 src/
   ○ M tui.tsx +19 -11
@@ -18,9 +18,11 @@ docs/
 
 - **Sidebar section** listing the files edited in the current session, including edits made by its subagents.
 - **Status and counts**: `A` added, `M` modified, `D` deleted, with green/red `+/-` line counts and header totals.
-- **Two views**, switched by clicking the `View:` line:
+- **Three views**, chosen by clicking a name on the `Session | Last turn | Since review` line:
   - **Whole session**: every edited file, compared with how it was before the session first touched it.
   - **Last turn**: only files edited since your latest prompt, compared with how they were before that turn.
+  - **Since review**: every edited file, compared with how it was when you last marked it reviewed, so after
+    further changes you only see what's new. Files you never reviewed are compared with session start.
 - **Grouped by folder**, 10 rows by default with a `Show all / Show less` toggle. Click the header to collapse.
 - **Click a file to open its diff** in VS Code (`code --diff`). Diffs never open automatically.
 - **Mark files as reviewed** by clicking the `○` in front of a file, which turns into `✓`. Reviewed files are hidden
@@ -181,7 +183,7 @@ Added and deleted files are compared against an empty placeholder named `<file> 
 | Command | Description |
 | --- | --- |
 | `/edits` | Pick a file to open its diff. `Ctrl+A` opens all, `Ctrl+R` toggles reviewed, `Ctrl+E` marks all reviewed, `Ctrl+T` switches the view. |
-| `/edits-view` | Switch between **Whole session** and **Last turn**. |
+| `/edits-view` | Cycle through **Whole session**, **Last turn** and **Since review**. |
 | `/edits-reviewed` | Show or hide reviewed files. |
 | `/edits-review-all` | Mark every file in the current view as reviewed, or unmark them all if they already are. |
 
@@ -194,7 +196,8 @@ by you:
 
 - `sessions/<sessionID>.json`: edited files, timestamps, turn tracking and review marks.
 - `backups/<sessionID>/`: a copy of each file from before the session first edited it, plus one from before the latest
-  turn that edited it. Older per-turn copies are replaced.
+  turn that edited it, and one from when you last marked it reviewed. Older per-turn and review copies are replaced;
+  unmarking a file deletes its review copy.
 
 A session's data is deleted when the session is deleted. Sessions deleted while OpenCode was not running are cleaned up
 on the next start, only when OpenCode reports the session as not found. There is no time-based expiry.

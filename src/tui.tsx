@@ -7,7 +7,7 @@ import { For, Show, createEffect, createMemo, createSignal, on, onCleanup } from
 import { EditedFiles, type EditedFile } from "./rpc.ts"
 
 /** "session": every edited file vs session start. "turn": only the last turn's files vs before that turn. */
-type View = "session" | "turn"
+type View = "session" | "turn" | "review"
 
 interface Prefs {
   expanded: boolean
@@ -81,9 +81,12 @@ export default Plugin.define({
     const countsOf = (file: EditedFile) =>
       prefs.baseline === "turn"
         ? { add: file.turnAdditions, del: file.turnDeletions }
-        : { add: file.additions, del: file.deletions }
+        : prefs.baseline === "review"
+          ? { add: file.reviewAdditions, del: file.reviewDeletions }
+          : { add: file.additions, del: file.deletions }
 
-    const viewLabel = () => (prefs.baseline === "turn" ? "Last turn" : "Whole session")
+    const VIEW_LABELS: Record<View, string> = { session: "Whole session", turn: "Last turn", review: "Since review" }
+    const viewLabel = () => VIEW_LABELS[prefs.baseline] ?? VIEW_LABELS.session
 
     const sessionDirectory = (sessionID: string) => context.data.session.get(sessionID)?.location?.directory
 
@@ -172,10 +175,12 @@ export default Plugin.define({
       return [...groups.values()]
     }
 
-    const toggleView = () =>
+    const VIEWS: View[] = ["session", "turn", "review"]
+    const setView = (view: View) =>
       setPrefs((draft) => {
-        draft.baseline = draft.baseline === "session" ? "turn" : "session"
+        draft.baseline = view
       }).catch(() => {})
+    const toggleView = () => setView(VIEWS[(VIEWS.indexOf(prefs.baseline) + 1) % VIEWS.length]!)
     const toggleShowReviewed = () =>
       setPrefs((draft) => {
         draft.showReviewed = !draft.showReviewed
@@ -195,7 +200,12 @@ export default Plugin.define({
             })
           }
         }
-        const before = prefs.baseline === "turn" ? file.turnBefore : file.sessionBefore
+        const before =
+          prefs.baseline === "turn"
+            ? file.turnBefore
+            : prefs.baseline === "review"
+              ? file.reviewBefore
+              : file.sessionBefore
         let child: ReturnType<typeof spawn>
         try {
           child = spawn(editor, ["--diff", diffSide(before, file.path), diffSide(file.after, file.path)], {
@@ -248,7 +258,9 @@ export default Plugin.define({
           title: "Edited files",
           message:
             all.length > 0
-              ? "All files are reviewed. Use /edits-reviewed to show them."
+              ? prefs.baseline === "review"
+                ? "No changes since review. Use /edits-reviewed to show reviewed files."
+                : "All files are reviewed. Use /edits-reviewed to show them."
               : prefs.baseline === "turn"
                 ? "No files edited in the last turn."
                 : "No files edited in this session yet.",
@@ -320,7 +332,7 @@ export default Plugin.define({
         },
         {
           id: "edited-files.view",
-          title: "Edited files: switch view (whole session / last turn)",
+          title: "Edited files: switch view (whole session / last turn / since review)",
           group: "Edited files",
           palette: true,
           slash: { name: "edits-view" },
@@ -473,12 +485,22 @@ export default Plugin.define({
             </Show>
           </Clickable>
           <Show when={prefs.expanded && files().length > 0}>
-            <Clickable onClick={() => void toggleView()}>
-              <text fg={color.muted()}>{"View: "}</text>
-              <text fg={prefs.baseline === "session" ? color.accent() : color.muted()}>{"Whole session"}</text>
-              <text fg={color.muted()}>{" | "}</text>
-              <text fg={prefs.baseline === "turn" ? color.accent() : color.muted()}>{"Last turn"}</text>
-            </Clickable>
+            <box flexDirection="row">
+              <For each={VIEWS}>
+                {(view, index) => (
+                  <>
+                    <Show when={index() > 0}>
+                      <text fg={color.muted()}>{" | "}</text>
+                    </Show>
+                    <Clickable onClick={() => void setView(view)}>
+                      <text fg={prefs.baseline === view ? color.accent() : color.muted()}>
+                        {view === "session" ? "Session" : VIEW_LABELS[view]}
+                      </text>
+                    </Clickable>
+                  </>
+                )}
+              </For>
+            </box>
             <Show when={inViewFiles().length > 0}>
               <box flexDirection="row">
                 <Show when={reviewedCount() > 0}>
@@ -496,7 +518,11 @@ export default Plugin.define({
             </Show>
             <Show when={scoped().length === 0}>
               <text fg={color.muted()}>
-                {inViewFiles().length > 0 ? "  All files reviewed" : "  No files edited in the last turn"}
+                {inViewFiles().length === 0
+                  ? "  No files edited in the last turn"
+                  : prefs.baseline === "review"
+                    ? "  No changes since review"
+                    : "  All files reviewed"}
               </text>
             </Show>
             <For each={groups()}>

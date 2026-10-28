@@ -12,6 +12,9 @@ const editedFile = {
     deletions: { type: "number" },
     turnAdditions: { type: "number" },
     turnDeletions: { type: "number" },
+    reviewBefore: { type: "string" },
+    reviewAdditions: { type: "number" },
+    reviewDeletions: { type: "number" },
     binary: { type: "boolean" },
     edits: { type: "number" },
     updated: { type: "number" },
@@ -27,6 +30,9 @@ const editedFile = {
     "deletions",
     "turnAdditions",
     "turnDeletions",
+    "reviewBefore",
+    "reviewAdditions",
+    "reviewDeletions",
     "binary",
     "edits",
     "updated",
@@ -107,6 +113,11 @@ export interface EditedFile {
   /** Line counts against `turnBefore`. */
   turnAdditions: number
   turnDeletions: number
+  /** Snapshot taken when the file was last marked reviewed; `sessionBefore` if it never was. */
+  reviewBefore: string
+  /** Line counts against `reviewBefore`. */
+  reviewAdditions: number
+  reviewDeletions: number
   binary: boolean
   /** Number of successful edit tool calls on the file. */
   edits: number
