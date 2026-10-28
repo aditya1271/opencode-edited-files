@@ -316,10 +316,12 @@ export default Plugin.define({
         return { files }
       },
       review: async (input) => {
-        const { sessionID, path: file, updated, reviewed } = input as ReviewInput
+        const { sessionID, files, reviewed } = input as ReviewInput
         const state = await stateOf(sessionID)
-        if (reviewed) state.reviewed.set(file, { updated, hash: await contentHash(file) })
-        else state.reviewed.delete(file)
+        for (const { path: file, updated } of files) {
+          if (reviewed) state.reviewed.set(file, { updated, hash: await contentHash(file) })
+          else state.reviewed.delete(file)
+        }
         await save(sessionID, state)
         await registration.events.emit("changed", { sessionID })
         return { ok: true }

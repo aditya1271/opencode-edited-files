@@ -6,7 +6,7 @@ Subagents, with `+/-` line counts and one-click diffs in VS Code.
 ```
 ▼ Edited Files 3 +49 -21
 view: whole session | last turn
-✓ 1 reviewed hidden · show
+✓ 1 reviewed · show · review all
 src/
   ○ M tui.tsx +19 -11
   ○ M index.ts +28 -10
@@ -24,11 +24,14 @@ docs/
 - **Grouped by folder**, 10 rows by default with a `show all / show less` toggle. Click the header to collapse.
 - **Click a file to open its diff** in VS Code (`code --diff`). Diffs never open automatically.
 - **Mark files as reviewed** by clicking the `○` in front of a file, which turns into `✓`. Reviewed files are hidden
-  by default; click `N reviewed hidden · show` to show them again, dimmed. If the file changes after you reviewed it,
+  by default; click `show` on the `✓ N reviewed · show · review all` line to show them again, dimmed. Click
+  `review all` to mark every file in the current view at once; when all are reviewed it becomes `unreview all`.
+  If the file changes after you reviewed it,
   by OpenCode, a shell command, a formatter or you in your editor, the mark is removed for good and the file
   reappears, even if the change is later undone. New changes are never hidden.
 - **`/edits` picker** with every file, grouped by folder and searchable. `Ctrl+A` opens all diffs (asks first above
-  10), `Ctrl+R` marks the selected file reviewed or not reviewed, and `Ctrl+T` switches the view.
+  10), `Ctrl+R` marks the selected file reviewed or not reviewed, `Ctrl+E` reviews (or unreviews) all, and `Ctrl+T`
+  switches the view.
 - **Persistent**: the edit list and "before" copies survive restarts and are removed when the session is deleted.
 
 ## Install
@@ -166,9 +169,10 @@ Added and deleted files are compared against an empty placeholder named `<file> 
 
 | Command | Description |
 | --- | --- |
-| `/edits` | Pick a file to open its diff. `Ctrl+A` opens all, `Ctrl+R` toggles reviewed, `Ctrl+T` switches the view. |
+| `/edits` | Pick a file to open its diff. `Ctrl+A` opens all, `Ctrl+R` toggles reviewed, `Ctrl+E` reviews all, `Ctrl+T` switches the view. |
 | `/edits-view` | Switch between **whole session** and **last turn**. |
 | `/edits-reviewed` | Show or hide reviewed files. |
+| `/edits-review-all` | Mark every file in the current view as reviewed, or unmark them all if they already are. |
 
 Both are also in the command palette under **Edited files**.
 

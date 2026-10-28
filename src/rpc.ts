@@ -57,11 +57,18 @@ export const EditedFiles = Rpc.define({
         type: "object",
         properties: {
           sessionID: { type: "string" },
-          path: { type: "string" },
-          updated: { type: "number" },
+          files: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { path: { type: "string" }, updated: { type: "number" } },
+              required: ["path", "updated"],
+              additionalProperties: false,
+            },
+          },
           reviewed: { type: "boolean" },
         },
-        required: ["sessionID", "path", "updated", "reviewed"],
+        required: ["sessionID", "files", "reviewed"],
         additionalProperties: false,
       },
       output: {
@@ -112,8 +119,7 @@ export interface EditedFile {
 export interface ReviewInput {
   /** Session that stores the mark (the root of the family). */
   sessionID: string
-  path: string
-  /** The file's `updated` value the user reviewed; a later edit clears the mark. */
-  updated: number
+  /** Each file with the `updated` value the user reviewed; a later edit clears the mark. */
+  files: { path: string; updated: number }[]
   reviewed: boolean
 }

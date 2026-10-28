@@ -111,16 +111,35 @@ export default Plugin.define({
     }
 
     /** Review marks live on the root session, so the whole family shares them. */
-    const setReviewed = async (sessionID: string, file: EditedFile, reviewed: boolean) => {
+    const setReviewed = async (sessionID: string, files: EditedFile[], reviewed: boolean) => {
+      if (files.length === 0) return
       try {
         await rpc.review(
-          { sessionID: rootOf(sessionID), path: file.path, updated: file.updated, reviewed },
+          {
+            sessionID: rootOf(sessionID),
+            files: files.map((file) => ({ path: file.path, updated: file.updated })),
+            reviewed,
+          },
           rpcOptions(sessionID),
         )
       } catch {
         context.ui.toast.show({ title: "Edited files", message: "Could not update the review mark", variant: "error" })
       }
     }
+
+    /** Reviews every unreviewed file in `files`; when none are left, clears all their marks instead. */
+    const reviewAll = async (sessionID: string, files: EditedFile[]) => {
+      const pending = files.filter((file) => !file.reviewed)
+      const marking = pending.length > 0
+      const targets = marking ? pending : files
+      if (targets.length === 0) return
+      await setReviewed(sessionID, targets, marking)
+      context.ui.toast.show({
+        title: "Edited files",
+        message: `${marking ? "Marked" : "Unmarked"} ${targets.length} file${targets.length === 1 ? "" : "s"} as reviewed`,
+      })
+    }
+    const reviewAllLabel = (files: EditedFile[]) => (files.some((file) => !file.reviewed) ? "review all" : "unreview all")
 
     /** Files that belong to the current view (whole session, or only the last turn). */
     const inView = (files: EditedFile[], sessionID: string) => {
@@ -253,7 +272,17 @@ export default Plugin.define({
             onTrigger: async (value: unknown) => {
               const file = files.find((f) => f.path === value)
               if (!file) return
-              await setReviewed(sessionID, file, !file.reviewed)
+              await setReviewed(sessionID, [file], !file.reviewed)
+              context.ui.dialog.clear()
+              void showPicker()
+            },
+          },
+          {
+            bind: "ctrl+e",
+            title: all.some((file) => !file.reviewed) ? "Review all" : "Unreview all",
+            selection: "none",
+            onTrigger: async () => {
+              await reviewAll(sessionID, all)
               context.ui.dialog.clear()
               void showPicker()
             },
@@ -302,6 +331,21 @@ export default Plugin.define({
           slash: { name: "edits-reviewed" },
           run: () => void toggleShowReviewed(),
         },
+        {
+          id: "edited-files.review-all",
+          title: "Edited files: mark all files in the current view as reviewed (or unmark them)",
+          group: "Edited files",
+          palette: true,
+          slash: { name: "edits-review-all" },
+          enabled: () => currentSessionID() !== undefined,
+          run: () => {
+            const sessionID = currentSessionID()
+            if (!sessionID) return
+            void fetchFiles(sessionID)
+              .then((files) => reviewAll(sessionID, inView(files, sessionID)))
+              .catch(() => {})
+          },
+        },
       ],
     }))
 
@@ -341,7 +385,7 @@ export default Plugin.define({
             onMouseOut={() => setMarkHover(false)}
             onMouseUp={(event: { stopPropagation(): void }) => {
               event.stopPropagation()
-              void setReviewed(props.sessionID, props.file, !props.file.reviewed)
+              void setReviewed(props.sessionID, [props.file], !props.file.reviewed)
             }}
           >
             <text fg={markHover() ? color.accent() : props.file.reviewed ? color.added() : color.muted()}>
@@ -432,12 +476,23 @@ export default Plugin.define({
               <text fg={color.muted()}>{" | "}</text>
               <text fg={prefs.baseline === "turn" ? color.accent() : color.muted()}>{"last turn"}</text>
             </Clickable>
-            <Show when={reviewedCount() > 0}>
-              <Clickable onClick={() => void toggleShowReviewed()}>
-                <text fg={color.added()}>{"✓ "}</text>
-                <text fg={color.muted()}>{`${reviewedCount()} reviewed${prefs.showReviewed ? "" : " hidden"} · `}</text>
-                <text fg={color.accent()}>{prefs.showReviewed ? "hide" : "show"}</text>
-              </Clickable>
+            <Show when={inViewFiles().length > 0}>
+              <box flexDirection="row">
+                <Show
+                  when={reviewedCount() > 0}
+                  fallback={<text fg={color.muted()}>{"○ "}</text>}
+                >
+                  <text fg={color.added()}>{"✓ "}</text>
+                  <text fg={color.muted()}>{`${reviewedCount()} reviewed · `}</text>
+                  <Clickable onClick={() => void toggleShowReviewed()}>
+                    <text fg={color.accent()}>{prefs.showReviewed ? "hide" : "show"}</text>
+                  </Clickable>
+                  <text fg={color.muted()}>{" · "}</text>
+                </Show>
+                <Clickable onClick={() => void reviewAll(props.sessionID, inViewFiles())}>
+                  <text fg={color.accent()}>{reviewAllLabel(inViewFiles())}</text>
+                </Clickable>
+              </box>
             </Show>
             <Show when={scoped().length === 0}>
               <text fg={color.muted()}>
