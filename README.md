@@ -151,6 +151,16 @@ Diffs open with `code --diff` by default. To use another editor CLI that support
 
 The `editor` option takes priority, then `OPENCODE_DIFF_EDITOR`, then `code`.
 
+### Sidebar position (optional)
+
+The section is placed at the top of the sidebar, above OpenCode's Context, Limit and MCP sections. To place it at the
+bottom instead, after the built-in sections and other plugins, use the object form of the entry (shown here for
+Method B):
+
+```jsonc
+"plugins": [{ "package": "opencode-edited-files", "options": { "position": "bottom" } }]
+```
+
 ### Uninstall
 
 1. Remove the entry from `plugins` and save.

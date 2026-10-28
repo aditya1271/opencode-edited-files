@@ -521,9 +521,10 @@ export default Plugin.define({
       )
     }
 
-    return context.ui.slot({
-      append: "sidebar.content",
-      render: (input) => <EditedFilesSection sessionID={input.sessionID} />,
-    })
+    const render = (input: { sessionID: string }) => <EditedFilesSection sessionID={input.sessionID} />
+    // Built-in sections (Context, Limit, MCP, Todo) are appended first, so "top" is the only way above MCP.
+    return (context.options as { position?: unknown } | undefined)?.position === "bottom"
+      ? context.ui.slot({ append: "sidebar.content", render })
+      : context.ui.slot({ prepend: "sidebar.content", render })
   },
 })
