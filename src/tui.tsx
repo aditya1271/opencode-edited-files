@@ -83,7 +83,7 @@ export default Plugin.define({
         ? { add: file.turnAdditions, del: file.turnDeletions }
         : { add: file.additions, del: file.deletions }
 
-    const viewLabel = () => (prefs.baseline === "turn" ? "last turn" : "whole session")
+    const viewLabel = () => (prefs.baseline === "turn" ? "Last turn" : "Whole session")
 
     const sessionDirectory = (sessionID: string) => context.data.session.get(sessionID)?.location?.directory
 
@@ -140,8 +140,8 @@ export default Plugin.define({
       })
     }
     const reviewAllLabel = (files: EditedFile[]) => {
-      if (!files.some((file) => !file.reviewed)) return "unmark all"
-      return files.some((file) => file.reviewed) ? "mark all" : "mark all as reviewed"
+      if (!files.some((file) => !file.reviewed)) return "Unmark all"
+      return files.some((file) => file.reviewed) ? "Mark all" : "Mark all as reviewed"
     }
 
     /** Files that belong to the current view (whole session, or only the last turn). */
@@ -474,10 +474,10 @@ export default Plugin.define({
           </Clickable>
           <Show when={prefs.expanded && files().length > 0}>
             <Clickable onClick={() => void toggleView()}>
-              <text fg={color.muted()}>{"view: "}</text>
-              <text fg={prefs.baseline === "session" ? color.accent() : color.muted()}>{"whole session"}</text>
+              <text fg={color.muted()}>{"View: "}</text>
+              <text fg={prefs.baseline === "session" ? color.accent() : color.muted()}>{"Whole session"}</text>
               <text fg={color.muted()}>{" | "}</text>
-              <text fg={prefs.baseline === "turn" ? color.accent() : color.muted()}>{"last turn"}</text>
+              <text fg={prefs.baseline === "turn" ? color.accent() : color.muted()}>{"Last turn"}</text>
             </Clickable>
             <Show when={inViewFiles().length > 0}>
               <box flexDirection="row">
@@ -485,7 +485,7 @@ export default Plugin.define({
                   <text fg={color.added()}>{"✓ "}</text>
                   <text fg={color.muted()}>{`${reviewedCount()} reviewed · `}</text>
                   <Clickable onClick={() => void toggleShowReviewed()}>
-                    <text fg={color.accent()}>{prefs.showReviewed ? "hide" : "show"}</text>
+                    <text fg={color.accent()}>{prefs.showReviewed ? "Hide" : "Show"}</text>
                   </Clickable>
                   <text fg={color.muted()}>{" · "}</text>
                 </Show>
@@ -496,7 +496,7 @@ export default Plugin.define({
             </Show>
             <Show when={scoped().length === 0}>
               <text fg={color.muted()}>
-                {inViewFiles().length > 0 ? "  all files reviewed" : "  no files edited in the last turn"}
+                {inViewFiles().length > 0 ? "  All files reviewed" : "  No files edited in the last turn"}
               </text>
             </Show>
             <For each={groups()}>
@@ -512,7 +512,7 @@ export default Plugin.define({
             <Show when={scoped().length > COMPACT_ROWS}>
               <Clickable onClick={() => updatePrefs((d) => void (d.showAll = !d.showAll))}>
                 <text fg={color.accent()}>
-                  {prefs.showAll ? "▲ show less" : `▼ show all (${scoped().length - COMPACT_ROWS} more)`}
+                  {prefs.showAll ? "▲ Show less" : `▼ Show all (${scoped().length - COMPACT_ROWS} more)`}
                 </text>
               </Clickable>
             </Show>

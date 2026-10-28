@@ -5,8 +5,8 @@ Subagents, with `+/-` line counts and one-click diffs in VS Code.
 
 ```
 ▼ Edited Files 3 +49 -21
-view: whole session | last turn
-✓ 1 reviewed · show · mark all
+View: Whole session | Last turn
+✓ 1 reviewed · Show · Mark all
 src/
   ○ M tui.tsx +19 -11
   ○ M index.ts +28 -10
@@ -18,15 +18,15 @@ docs/
 
 - **Sidebar section** listing the files edited in the current session, including edits made by its subagents.
 - **Status and counts**: `A` added, `M` modified, `D` deleted, with green/red `+/-` line counts and header totals.
-- **Two views**, switched by clicking the `view:` line:
-  - **whole session**: every edited file, compared with how it was before the session first touched it.
-  - **last turn**: only files edited since your latest prompt, compared with how they were before that turn.
-- **Grouped by folder**, 10 rows by default with a `show all / show less` toggle. Click the header to collapse.
+- **Two views**, switched by clicking the `View:` line:
+  - **Whole session**: every edited file, compared with how it was before the session first touched it.
+  - **Last turn**: only files edited since your latest prompt, compared with how they were before that turn.
+- **Grouped by folder**, 10 rows by default with a `Show all / Show less` toggle. Click the header to collapse.
 - **Click a file to open its diff** in VS Code (`code --diff`). Diffs never open automatically.
 - **Mark files as reviewed** by clicking the `○` in front of a file, which turns into `✓`. Reviewed files are hidden
-  by default; click `show` on the `✓ N reviewed · show · mark all` line to show them again, dimmed. Click
-  `mark all as reviewed` (shortened to `mark all` once some files are reviewed) to mark every file in the current
-  view at once; when all are reviewed it becomes `unmark all`.
+  by default; click `Show` on the `✓ N reviewed · Show · Mark all` line to show them again, dimmed. Click
+  `Mark all as reviewed` (shortened to `Mark all` once some files are reviewed) to mark every file in the current
+  view at once; when all are reviewed it becomes `Unmark all`.
   If the file changes after you reviewed it,
   by OpenCode, a shell command, a formatter or you in your editor, the mark is removed for good and the file
   reappears, even if the change is later undone. New changes are never hidden.
@@ -171,7 +171,7 @@ Added and deleted files are compared against an empty placeholder named `<file> 
 | Command | Description |
 | --- | --- |
 | `/edits` | Pick a file to open its diff. `Ctrl+A` opens all, `Ctrl+R` toggles reviewed, `Ctrl+E` marks all reviewed, `Ctrl+T` switches the view. |
-| `/edits-view` | Switch between **whole session** and **last turn**. |
+| `/edits-view` | Switch between **Whole session** and **Last turn**. |
 | `/edits-reviewed` | Show or hide reviewed files. |
 | `/edits-review-all` | Mark every file in the current view as reviewed, or unmark them all if they already are. |
 
