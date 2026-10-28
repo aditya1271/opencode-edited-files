@@ -1,6 +1,6 @@
 import { Plugin } from "@opencode/plugin"
 import { execFile } from "node:child_process"
-import { randomUUID } from "node:crypto"
+import { createHash, randomUUID } from "node:crypto"
 import { copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import path from "node:path"
@@ -28,8 +28,15 @@ interface Tracked {
 interface SessionState {
   turn: number
   files: Map<string, Tracked>
-  /** Path -> the `updated` value that was reviewed. */
-  reviewed: Map<string, number>
+  reviewed: Map<string, ReviewMark>
+}
+
+/** A file counts as reviewed while it has no newer tracked edit and its content still matches. */
+interface ReviewMark {
+  /** The file's `updated` value that was reviewed. */
+  updated: number
+  /** SHA-256 of the content when it was marked, or "gone" for a deleted file. */
+  hash: string
 }
 
 /** Snapshot decision made before a tool runs; applied once it succeeds. */
@@ -143,12 +150,15 @@ export default Plugin.define({
         const raw = JSON.parse(await readFile(stateFile(sessionID), "utf8")) as {
           turn: number
           files: Tracked[]
-          reviewed?: Record<string, number>
+          reviewed?: Record<string, ReviewMark>
         }
+        const marks = Object.entries(raw.reviewed ?? {}).filter(
+          (entry): entry is [string, ReviewMark] => typeof entry[1]?.hash === "string",
+        )
         return {
           turn: raw.turn ?? 0,
           files: new Map(raw.files.map((file) => [file.path, file])),
-          reviewed: new Map(Object.entries(raw.reviewed ?? {})),
+          reviewed: new Map(marks),
         }
       } catch {
         return { turn: 0, files: new Map(), reviewed: new Map() }
@@ -205,6 +215,22 @@ export default Plugin.define({
       }
     }
 
+    const hashCache = new Map<string, { version: string; hash: string }>()
+    const contentHash = async (file: string) => {
+      const info = await fileInfo(file)
+      if (!info) return "gone"
+      const version = `${info.mtimeMs}:${info.size}`
+      const cached = hashCache.get(file)
+      if (cached?.version === version) return cached.hash
+      try {
+        const hash = createHash("sha256").update(await readFile(file)).digest("hex")
+        hashCache.set(file, { version, hash })
+        return hash
+      } catch {
+        return "unreadable"
+      }
+    }
+
     const discard = (file: string | undefined) => {
       if (file && file.startsWith(backupsDir + path.sep)) void removeQuietly(file)
     }
@@ -214,10 +240,13 @@ export default Plugin.define({
         const { sessionIDs } = input as { sessionIDs: string[] }
         // Merge the family: earliest session baseline, latest turn baseline per path.
         const merged = new Map<string, Tracked>()
-        const reviewedAt = new Map<string, number>()
+        const marks = new Map<string, { mark: ReviewMark; sessionID: string }>()
         for (const sessionID of sessionIDs) {
           const state = await stateOf(sessionID)
-          for (const [file, at] of state.reviewed) reviewedAt.set(file, Math.max(at, reviewedAt.get(file) ?? 0))
+          for (const [file, mark] of state.reviewed) {
+            const seen = marks.get(file)
+            if (!seen || mark.updated > seen.mark.updated) marks.set(file, { mark, sessionID })
+          }
           for (const file of state.files.values()) {
             const seen = merged.get(file.path)
             if (!seen) {
@@ -234,6 +263,18 @@ export default Plugin.define({
             }
             seen.edits += file.edits
           }
+        }
+
+        /** Checks a mark; a mark the file has outgrown is deleted for good. */
+        const stale = new Set<string>()
+        const isReviewed = async (file: Tracked) => {
+          const entry = marks.get(file.path)
+          if (!entry) return false
+          if (entry.mark.updated >= file.updated && entry.mark.hash === (await contentHash(file.path))) return true
+          const state = await stateOf(entry.sessionID)
+          state.reviewed.delete(file.path)
+          stale.add(entry.sessionID)
+          return false
         }
 
         const files: EditedFile[] = []
@@ -267,16 +308,17 @@ export default Plugin.define({
             binary: stats.binary,
             edits: file.edits,
             updated: file.updated,
-            reviewed: (reviewedAt.get(file.path) ?? -1) >= file.updated,
+            reviewed: await isReviewed(file),
           })
         }
+        for (const sessionID of stale) await save(sessionID, await stateOf(sessionID))
         files.sort((a, b) => b.updated - a.updated)
         return { files }
       },
       review: async (input) => {
         const { sessionID, path: file, updated, reviewed } = input as ReviewInput
         const state = await stateOf(sessionID)
-        if (reviewed) state.reviewed.set(file, updated)
+        if (reviewed) state.reviewed.set(file, { updated, hash: await contentHash(file) })
         else state.reviewed.delete(file)
         await save(sessionID, state)
         await registration.events.emit("changed", { sessionID })

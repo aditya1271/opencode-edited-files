@@ -24,6 +24,7 @@ interface Group {
 const SIDEBAR_WIDTH = 38
 const COMPACT_ROWS = 10
 const CONFIRM_OPEN_ABOVE = 10
+const REVIEW_RECHECK_MS = 5000
 const STATUS_MARK: Record<EditedFile["status"], string> = { added: "A", modified: "M", deleted: "D" }
 
 /** Editor CLI that supports `--diff <left> <right>`: plugin option `editor`, then $OPENCODE_DIFF_EDITOR, then `code`. */
@@ -384,6 +385,12 @@ export default Plugin.define({
           },
         ),
       )
+      // Edits made outside OpenCode send no event, so re-check while any file is marked reviewed.
+      createEffect(() => {
+        if (!files().some((file) => file.reviewed)) return
+        const poll = setInterval(refresh, REVIEW_RECHECK_MS)
+        onCleanup(() => clearInterval(poll))
+      })
       const stopChanged = rpc.events.on("changed", () => refresh())
       const stopTurn = context.data.on("session.execution.succeeded", () => refresh())
       const stopRevert = context.data.on("session.revert.committed", () => refresh())

@@ -105,7 +105,7 @@ export interface EditedFile {
   edits: number
   /** Last edit time (epoch ms). */
   updated: number
-  /** Marked as reviewed, and not edited since. */
+  /** Marked as reviewed, with no edit since: no newer tracked edit and unchanged content. */
   reviewed: boolean
 }
 

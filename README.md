@@ -24,8 +24,9 @@ docs/
 - **Grouped by folder**, 10 rows by default with a `show all / show less` toggle. Click the header to collapse.
 - **Click a file to open its diff** in VS Code (`code --diff`). Diffs never open automatically.
 - **Mark files as reviewed** by clicking the `○` in front of a file, which turns into `✓`. Reviewed files are hidden
-  by default; click `N reviewed hidden · show` to show them again, dimmed. If the file is edited again after you
-  reviewed it, the mark clears and the file reappears, so new changes are never hidden.
+  by default; click `N reviewed hidden · show` to show them again, dimmed. If the file changes after you reviewed it,
+  by OpenCode, a shell command, a formatter or you in your editor, the mark is removed for good and the file
+  reappears, even if the change is later undone. New changes are never hidden.
 - **`/edits` picker** with every file, grouped by folder and searchable. `Ctrl+A` opens all diffs (asks first above
   10), `Ctrl+R` marks the selected file reviewed or not reviewed, and `Ctrl+T` switches the view.
 - **Persistent**: the edit list and "before" copies survive restarts and are removed when the session is deleted.
