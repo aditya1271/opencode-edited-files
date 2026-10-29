@@ -14,6 +14,8 @@ interface Prefs {
   baseline: View
   showAll?: boolean
   showReviewed?: boolean
+  /** The Workspace and Outside workspace headings the user collapsed. */
+  collapsed?: { workspace?: boolean; outside?: boolean }
 }
 
 interface Group {
@@ -473,24 +475,23 @@ export default Plugin.define({
       const inViewFiles = createMemo(() => inView(files(), props.sessionID))
       const reviewedCount = () => inViewFiles().filter((file) => file.reviewed).length
       const scoped = createMemo(() => withoutHiddenReviewed(inViewFiles()))
-      const ordered = createMemo(() => workspaceFirst(scoped(), props.sessionID))
-      const visible = createMemo(() => (prefs.showAll ? ordered() : ordered().slice(0, COMPACT_ROWS)))
-      const groups = createMemo(() => groupByDir(visible(), props.sessionID))
       const sum = (files: EditedFile[]) =>
         files.reduce((acc, f) => ({ add: acc.add + countsOf(f).add, del: acc.del + countsOf(f).del }), { add: 0, del: 0 })
       const totals = () => sum(scoped())
-      // The Workspace and Outside workspace headings show only when some files are outside.
+      // The Workspace and Outside workspace headings show only when some files are outside; each can be collapsed.
       const outsideFiles = createMemo(() => scoped().filter((file) => workspacePath(file, props.sessionID) === undefined))
       const split = () => outsideFiles().length > 0
-      const kindLine = (outside: boolean) => {
-        const files = outside ? outsideFiles() : scoped().filter((file) => !outsideFiles().includes(file))
-        return { label: outside ? "Outside workspace" : "Workspace", count: files.length, ...sum(files) }
-      }
-      const hiddenOutside = () => outsideFiles().filter((file) => !visible().includes(file)).length
-      const firstOfKind = (index: number) => {
-        const list = groups()
-        return index === 0 || list[index - 1]!.outside !== list[index]!.outside
-      }
+      const kindOf = (outside: boolean) => (outside ? "outside" : "workspace")
+      const isCollapsed = (outside: boolean) => split() && !!prefs.collapsed?.[kindOf(outside)]
+      const toggleKind = (outside: boolean) =>
+        updatePrefs((d) => void (d.collapsed = { ...d.collapsed, [kindOf(outside)]: !d.collapsed?.[kindOf(outside)] }))
+      const kindFiles = (outside: boolean) => (outside ? outsideFiles() : scoped().filter((file) => !outsideFiles().includes(file)))
+      // Rows go to workspace files first; collapsed files take none.
+      const shown = createMemo(() => workspaceFirst(scoped(), props.sessionID).filter((file) => !isCollapsed(workspacePath(file, props.sessionID) === undefined)))
+      const visible = createMemo(() => (prefs.showAll ? shown() : shown().slice(0, COMPACT_ROWS)))
+      const groups = createMemo(() => groupByDir(visible(), props.sessionID))
+      const kinds = () => (split() ? [false, true] : [undefined])
+      const hiddenOutside = () => outsideFiles().filter((file) => shown().includes(file) && !visible().includes(file)).length
 
       return (
         <box flexDirection="column" paddingX={1} paddingY={1}>
@@ -546,28 +547,34 @@ export default Plugin.define({
                     : "  All files reviewed"}
               </text>
             </Show>
-            <For each={groups()}>
-              {(group, index) => (
+            <For each={kinds()}>
+              {(outside) => (
                 <box flexDirection="column">
-                  <Show when={split() && firstOfKind(index())}>
-                    <box flexDirection="row">
-                      <text fg={color.header()}>{`${kindLine(group.outside).label} `}</text>
-                      <text fg={color.muted()}>{`${kindLine(group.outside).count} `}</text>
-                      <text fg={color.added()}>{`+${kindLine(group.outside).add} `}</text>
-                      <text fg={color.removed()}>{`-${kindLine(group.outside).del}`}</text>
-                    </box>
+                  <Show when={outside !== undefined}>
+                    <Clickable onClick={() => toggleKind(!!outside)}>
+                      <text fg={color.header()}>{`${isCollapsed(!!outside) ? "▶" : "▼"} ${outside ? "Outside workspace" : "Workspace"} `}</text>
+                      <text fg={color.muted()}>{`${kindFiles(!!outside).length} `}</text>
+                      <text fg={color.added()}>{`+${sum(kindFiles(!!outside)).add} `}</text>
+                      <text fg={color.removed()}>{`-${sum(kindFiles(!!outside)).del}`}</text>
+                    </Clickable>
                   </Show>
-                  <text fg={color.muted()}>
-                    {truncateLeft(group.dir === "." ? "./" : `${group.dir}/`, SIDEBAR_WIDTH - 2)}
-                  </text>
-                  <For each={group.files}>{(file) => <FileRow file={file} sessionID={props.sessionID} />}</For>
+                  <For each={groups().filter((group) => outside === undefined || group.outside === outside)}>
+                    {(group) => (
+                      <box flexDirection="column">
+                        <text fg={color.muted()}>
+                          {truncateLeft(group.dir === "." ? "./" : `${group.dir}/`, SIDEBAR_WIDTH - 2)}
+                        </text>
+                        <For each={group.files}>{(file) => <FileRow file={file} sessionID={props.sessionID} />}</For>
+                      </box>
+                    )}
+                  </For>
                 </box>
               )}
             </For>
-            <Show when={scoped().length > COMPACT_ROWS}>
+            <Show when={shown().length > COMPACT_ROWS}>
               <Clickable onClick={() => updatePrefs((d) => void (d.showAll = !d.showAll))}>
                 <text fg={color.accent()}>
-                  {prefs.showAll ? "▲ Show less" : `▼ Show all (${scoped().length - COMPACT_ROWS} more${hiddenOutside() ? `, ${hiddenOutside()} outside workspace` : ""})`}
+                  {prefs.showAll ? "▲ Show less" : `▼ Show all (${shown().length - COMPACT_ROWS} more${hiddenOutside() ? `, ${hiddenOutside()} outside workspace` : ""})`}
                 </text>
               </Clickable>
             </Show>

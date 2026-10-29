@@ -25,7 +25,8 @@ docs/
     further changes you only see what's new. Files you never reviewed are compared with session start.
 - **Grouped by folder**, workspace files first: when some files are outside the session's folder (plans, notes,
   caches), a **Workspace** and an **Outside workspace** heading split them, each with its count and +/- totals.
-  10 rows by default, workspace files first, with a `Show all / Show less` toggle. Click the header to collapse.
+  Click a heading to collapse it (remembered). 10 rows by default, workspace files first, with a
+  `Show all / Show less` toggle; collapsed files take no rows. Click the header to collapse the section.
 - **Click a file to open its diff** in VS Code (`code --diff`). Diffs never open automatically.
 - **Mark files as reviewed** by clicking the `○` in front of a file, which turns into `✓`. Reviewed files are hidden
   by default; click `Show` on the `✓ N reviewed · Show · Mark all` line to show them again, dimmed. Click
