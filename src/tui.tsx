@@ -19,6 +19,8 @@ interface Prefs {
 interface Group {
   dir: string
   files: EditedFile[]
+  /** Outside the session's directory. */
+  outside: boolean
 }
 
 const SIDEBAR_WIDTH = 38
@@ -157,19 +159,27 @@ export default Plugin.define({
     const withoutHiddenReviewed = (files: EditedFile[]) =>
       prefs.showReviewed ? files : files.filter((file) => !file.reviewed)
 
-    const displayPath = (file: EditedFile, sessionID: string) => {
+    const workspacePath = (file: EditedFile, sessionID: string) => {
       const base = sessionDirectory(sessionID)
       const relative = base ? path.relative(base, file.path) : ""
-      return relative && !relative.startsWith("..") ? relative : context.ui.format.path(file.path)
+      return relative && !relative.startsWith("..") && !path.isAbsolute(relative) ? relative : undefined
     }
 
-    /** Groups by folder, keeping the order of first appearance (files arrive newest first). */
+    const displayPath = (file: EditedFile, sessionID: string) => workspacePath(file, sessionID) ?? context.ui.format.path(file.path)
+
+    /** Workspace files first, then the ones outside it; each keeps its order (newest first). */
+    const workspaceFirst = (files: EditedFile[], sessionID: string) => {
+      const inside = files.filter((file) => workspacePath(file, sessionID) !== undefined)
+      return [...inside, ...files.filter((file) => !inside.includes(file))]
+    }
+
+    /** Groups by folder, workspace folders first, each in the order of first appearance. */
     const groupByDir = (files: EditedFile[], sessionID: string): Group[] => {
       const groups = new Map<string, Group>()
-      for (const file of files) {
+      for (const file of workspaceFirst(files, sessionID)) {
         const dir = path.dirname(displayPath(file, sessionID))
         let group = groups.get(dir)
-        if (!group) groups.set(dir, (group = { dir, files: [] }))
+        if (!group) groups.set(dir, (group = { dir, files: [], outside: workspacePath(file, sessionID) === undefined }))
         group.files.push(file)
       }
       return [...groups.values()]
@@ -273,7 +283,7 @@ export default Plugin.define({
           group.files.map((file) => ({
             title: `${file.reviewed ? "✓" : STATUS_MARK[file.status]} ${path.basename(file.path)}`,
             value: file.path,
-            category: group.dir === "." ? "./" : group.dir,
+            category: group.outside ? `Outside workspace · ${group.dir}` : group.dir === "." ? "./" : group.dir,
             description:
               (file.binary ? "binary" : `+${countsOf(file).add} -${countsOf(file).del}`) +
               (file.reviewed ? " · reviewed" : ""),
@@ -463,13 +473,24 @@ export default Plugin.define({
       const inViewFiles = createMemo(() => inView(files(), props.sessionID))
       const reviewedCount = () => inViewFiles().filter((file) => file.reviewed).length
       const scoped = createMemo(() => withoutHiddenReviewed(inViewFiles()))
-      const visible = createMemo(() => (prefs.showAll ? scoped() : scoped().slice(0, COMPACT_ROWS)))
+      const ordered = createMemo(() => workspaceFirst(scoped(), props.sessionID))
+      const visible = createMemo(() => (prefs.showAll ? ordered() : ordered().slice(0, COMPACT_ROWS)))
       const groups = createMemo(() => groupByDir(visible(), props.sessionID))
-      const totals = () =>
-        scoped().reduce(
-          (acc, f) => ({ add: acc.add + countsOf(f).add, del: acc.del + countsOf(f).del }),
-          { add: 0, del: 0 },
-        )
+      const sum = (files: EditedFile[]) =>
+        files.reduce((acc, f) => ({ add: acc.add + countsOf(f).add, del: acc.del + countsOf(f).del }), { add: 0, del: 0 })
+      const totals = () => sum(scoped())
+      // The Workspace and Outside workspace headings show only when some files are outside.
+      const outsideFiles = createMemo(() => scoped().filter((file) => workspacePath(file, props.sessionID) === undefined))
+      const split = () => outsideFiles().length > 0
+      const kindLine = (outside: boolean) => {
+        const files = outside ? outsideFiles() : scoped().filter((file) => !outsideFiles().includes(file))
+        return { label: outside ? "Outside workspace" : "Workspace", count: files.length, ...sum(files) }
+      }
+      const hiddenOutside = () => outsideFiles().filter((file) => !visible().includes(file)).length
+      const firstOfKind = (index: number) => {
+        const list = groups()
+        return index === 0 || list[index - 1]!.outside !== list[index]!.outside
+      }
 
       return (
         <box flexDirection="column" paddingX={1} paddingY={1}>
@@ -526,8 +547,16 @@ export default Plugin.define({
               </text>
             </Show>
             <For each={groups()}>
-              {(group) => (
+              {(group, index) => (
                 <box flexDirection="column">
+                  <Show when={split() && firstOfKind(index())}>
+                    <box flexDirection="row">
+                      <text fg={color.header()}>{`${kindLine(group.outside).label} `}</text>
+                      <text fg={color.muted()}>{`${kindLine(group.outside).count} `}</text>
+                      <text fg={color.added()}>{`+${kindLine(group.outside).add} `}</text>
+                      <text fg={color.removed()}>{`-${kindLine(group.outside).del}`}</text>
+                    </box>
+                  </Show>
                   <text fg={color.muted()}>
                     {truncateLeft(group.dir === "." ? "./" : `${group.dir}/`, SIDEBAR_WIDTH - 2)}
                   </text>
@@ -538,7 +567,7 @@ export default Plugin.define({
             <Show when={scoped().length > COMPACT_ROWS}>
               <Clickable onClick={() => updatePrefs((d) => void (d.showAll = !d.showAll))}>
                 <text fg={color.accent()}>
-                  {prefs.showAll ? "▲ Show less" : `▼ Show all (${scoped().length - COMPACT_ROWS} more)`}
+                  {prefs.showAll ? "▲ Show less" : `▼ Show all (${scoped().length - COMPACT_ROWS} more${hiddenOutside() ? `, ${hiddenOutside()} outside workspace` : ""})`}
                 </text>
               </Clickable>
             </Show>

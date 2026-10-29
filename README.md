@@ -23,7 +23,9 @@ docs/
   - **Last turn**: only files edited since your latest prompt, compared with how they were before that turn.
   - **Since review**: every edited file, compared with how it was when you last marked it reviewed, so after
     further changes you only see what's new. Files you never reviewed are compared with session start.
-- **Grouped by folder**, 10 rows by default with a `Show all / Show less` toggle. Click the header to collapse.
+- **Grouped by folder**, workspace files first: when some files are outside the session's folder (plans, notes,
+  caches), a **Workspace** and an **Outside workspace** heading split them, each with its count and +/- totals.
+  10 rows by default, workspace files first, with a `Show all / Show less` toggle. Click the header to collapse.
 - **Click a file to open its diff** in VS Code (`code --diff`). Diffs never open automatically.
 - **Mark files as reviewed** by clicking the `○` in front of a file, which turns into `✓`. Reviewed files are hidden
   by default; click `Show` on the `✓ N reviewed · Show · Mark all` line to show them again, dimmed. Click
@@ -32,7 +34,7 @@ docs/
   If the file changes after you reviewed it,
   by OpenCode, a shell command, a formatter or you in your editor, the mark is removed for good and the file
   reappears, even if the change is later undone. New changes are never hidden.
-- **`/edits` picker** with every file, grouped by folder and searchable. `Ctrl+A` opens all diffs (asks first above
+- **`/edits` picker** with every file, grouped by folder (workspace folders first) and searchable. `Ctrl+A` opens all diffs (asks first above
   10), `Ctrl+R` marks the selected file reviewed or not reviewed, `Ctrl+E` marks all reviewed (or unmarks all), and `Ctrl+T`
   switches the view.
 - **Persistent**: the edit list and "before" copies survive restarts and are removed when the session is deleted.
