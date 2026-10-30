@@ -1,7 +1,7 @@
 # opencode-edited-files
 
 An [OpenCode](https://opencode.ai) V2 plugin that lists every file a session has edited in the sidebar, next to MCP and
-Subagents, with `+/-` line counts and one-click diffs in VS Code.
+Subagents, with `+/-` line counts and one-click diffs in VS Code, vim or gvim.
 
 ```
 ▼ Edited Files 3 +49 -21
@@ -27,7 +27,8 @@ docs/
   caches), a **Workspace** and an **Outside workspace** heading split them, each with its count and +/- totals.
   Click a heading to collapse it (remembered). 10 rows by default, workspace files first, with a
   `Show all / Show less` toggle; collapsed files take no rows. Click the header to collapse the section.
-- **Click a file to open its diff** in VS Code (`code --diff`). Diffs never open automatically.
+- **Click a file to open its diff** in VS Code (`code --diff`), in `vimdiff` inside the OpenCode terminal, or in a
+  `gvimdiff` window. Diffs never open automatically.
 - **Mark files as reviewed** by clicking the `○` in front of a file, which turns into `✓`. Reviewed files are hidden
   by default; click `Show` on the `✓ N reviewed · Show · Mark all` line to show them again, dimmed. Click
   `Mark all as reviewed` (shortened to `Mark all` once some files are reviewed) to mark every file in the current
@@ -36,7 +37,7 @@ docs/
   by OpenCode, a shell command, a formatter or you in your editor, the mark is removed for good and the file
   reappears, even if the change is later undone. New changes are never hidden.
 - **`/edits` picker** with every file, grouped by folder (workspace folders first) and searchable. `Ctrl+A` opens all diffs (asks first above
-  10), `Ctrl+R` marks the selected file reviewed or not reviewed, `Ctrl+E` marks all reviewed (or unmarks all), and `Ctrl+T`
+  10; in vim they open one after another), `Ctrl+R` marks the selected file reviewed or not reviewed, `Ctrl+E` marks all reviewed (or unmarks all), and `Ctrl+T`
   switches the view.
 - **Persistent**: the edit list and "before" copies survive restarts and are removed when the session is deleted.
 
@@ -138,14 +139,25 @@ folder instead of the global config.
 
 ### Choose a different editor (optional)
 
-Diffs open with `code --diff` by default. To use another editor CLI that supports `--diff <left> <right>`, such as
-`cursor` or `code-insiders`, either:
+By default diffs open with `code --diff` in a VS Code terminal and with `vimdiff` everywhere else. Supported editors:
+
+| Editor | How the diff opens |
+| --- | --- |
+| `code`, `cursor`, `code-insiders`, or any CLI with `--diff <left> <right>` | A diff tab; needs the VS Code integrated terminal |
+| `vimdiff`, `vim`, `nvim`, `vi` | In the OpenCode terminal: OpenCode is suspended and comes back when vim quits |
+| `gvimdiff`, `gvim` | A separate gvim window per file; needs `$DISPLAY` |
+
+The value may include arguments, e.g. `vim -u ~/.vimrc.diff`. In vim the left window is the read-only "before"
+copy and the right window is the real file, so you can fix things right there. With several files (`Ctrl+A`), vim
+opens them one after another: `:qa` goes to the next file and `:cq` skips the rest.
+
+To choose, either:
 
 - set the environment variable before starting OpenCode, which works with both methods:
 
   ```sh
-  export OPENCODE_DIFF_EDITOR=cursor        # bash/zsh
-  setenv OPENCODE_DIFF_EDITOR cursor        # csh/tcsh
+  export OPENCODE_DIFF_EDITOR=gvimdiff      # bash/zsh
+  setenv OPENCODE_DIFF_EDITOR gvimdiff      # csh/tcsh
   ```
 
 - or, with Method B, replace the plain entry with an object:
@@ -154,7 +166,7 @@ Diffs open with `code --diff` by default. To use another editor CLI that support
   "plugins": [{ "package": "opencode-edited-files", "options": { "editor": "cursor" } }]
   ```
 
-The `editor` option takes priority, then `OPENCODE_DIFF_EDITOR`, then `code`.
+The `editor` option takes priority, then `OPENCODE_DIFF_EDITOR`, then `code` (VS Code terminal) or `vimdiff`.
 
 ### Sidebar position (optional)
 
@@ -174,9 +186,12 @@ Method B):
 
 ## Opening diffs
 
-Diffs open only when OpenCode runs in a **VS Code integrated terminal** (including Remote-SSH), where
-`VSCODE_IPC_HOOK_CLI` is set and `code --diff` reaches your VS Code window. In any other terminal the sidebar and counts
-still work, and clicking a file shows a notice instead.
+- **VS Code** (`code --diff`): only in a **VS Code integrated terminal** (including Remote-SSH), where
+  `VSCODE_IPC_HOOK_CLI` is set and `code --diff` reaches your VS Code window.
+- **vim** (`vimdiff`): in any terminal. It takes over the OpenCode screen until you quit vim.
+- **gvim** (`gvimdiff`): in any terminal with an X display (`$DISPLAY` set).
+
+When the chosen editor can't work in the current terminal, clicking a file shows a notice saying what to set.
 
 Added and deleted files are compared against an empty placeholder named `<file> (none)`, because VS Code cannot open
 `/dev/null`.
@@ -219,7 +234,7 @@ Sidebar preferences (collapsed, view, show all) use OpenCode's plugin storage.
 ## Requirements
 
 - OpenCode 2.2 or later.
-- `diff` on `PATH`; VS Code (or another `--diff` capable editor) for opening diffs.
+- `diff` on `PATH`; VS Code (or another `--diff` capable editor), vim or gvim for opening diffs.
 
 ## Credits
 

@@ -31,14 +31,39 @@ const CONFIRM_OPEN_ABOVE = 10
 const REVIEW_RECHECK_MS = 5000
 const STATUS_MARK: Record<EditedFile["status"], string> = { added: "A", modified: "M", deleted: "D" }
 
-/** Editor CLI that supports `--diff <left> <right>`: plugin option `editor`, then $OPENCODE_DIFF_EDITOR, then `code`. */
+/**
+ * Diff editor command: plugin option `editor`, then $OPENCODE_DIFF_EDITOR, then `code` in a VS Code terminal and
+ * `vimdiff` anywhere else. It may carry arguments, e.g. "vim -u NONE".
+ */
 const resolveEditor = (options: Readonly<Record<string, unknown>> | undefined): string => {
   const fromOptions = options?.editor
   if (typeof fromOptions === "string" && fromOptions.trim()) return fromOptions.trim()
   const fromEnv = process.env.OPENCODE_DIFF_EDITOR
   if (fromEnv?.trim()) return fromEnv.trim()
-  return "code"
+  return process.env.VSCODE_IPC_HOOK_CLI ? "code" : "vimdiff"
 }
+
+/**
+ * How the editor opens a diff:
+ * - terminal: vim/nvim in OpenCode's own terminal; the TUI is suspended until the editor quits.
+ * - gui: gvim in its own window (needs $DISPLAY).
+ * - cli: a `--diff <left> <right>` CLI such as code or cursor (needs a VS Code terminal).
+ */
+type EditorKind = "terminal" | "gui" | "cli"
+const VIM_KIND: Record<string, EditorKind> = {
+  vi: "terminal", vim: "terminal", vimdiff: "terminal", nvim: "terminal", view: "terminal",
+  gvim: "gui", gvimdiff: "gui",
+}
+const editorKind = (command: string[]): EditorKind => VIM_KIND[path.basename(command[0] ?? "")] ?? "cli"
+
+/** vim arguments for one diff: the before copy (left) is read-only; the right side is the real file. */
+const vimDiffArgs = (command: string[], left: string, right: string) => [
+  ...command.slice(1),
+  ...(/diff$/.test(path.basename(command[0]!)) ? [] : ["-d"]),
+  "-c", "wincmd t | setlocal readonly nomodifiable | wincmd b",
+  left,
+  right,
+]
 
 const NULL_DEVICE = "/dev/null"
 
@@ -64,7 +89,10 @@ export default Plugin.define({
   id: "edited-files.tui",
   setup(context) {
     const editor = resolveEditor(context.options as Readonly<Record<string, unknown>> | undefined)
+    const editorCommand = editor.split(/\s+/)
+    const kind = editorKind(editorCommand)
     const inVSCode = !!process.env.VSCODE_IPC_HOOK_CLI
+    let inTerminalEditor = false
     const rpc = context.client.rpc(EditedFiles)
     const [prefs, setPrefs] = context.storage.store<Prefs>("prefs", {
       initial: { expanded: true, baseline: "session", showAll: false },
@@ -198,6 +226,16 @@ export default Plugin.define({
         draft.showReviewed = !draft.showReviewed
       }).catch(() => {})
 
+    const beforeOf = (file: EditedFile) =>
+      prefs.baseline === "turn" ? file.turnBefore : prefs.baseline === "review" ? file.reviewBefore : file.sessionBefore
+
+    const diffArgs = (file: EditedFile) => {
+      const left = diffSide(beforeOf(file), file.path)
+      const right = diffSide(file.after, file.path)
+      return kind === "cli" ? [...editorCommand.slice(1), "--diff", left, right] : vimDiffArgs(editorCommand, left, right)
+    }
+
+    /** code/cursor tabs or gvim windows: started detached, all at once. */
     const spawnDiffs = (files: EditedFile[]) => {
       let failed = 0
       let done = 0
@@ -207,23 +245,14 @@ export default Plugin.define({
           if (++done === files.length && failed > 0) {
             context.ui.toast.show({
               title: "Edited files",
-              message: `Could not open ${failed} of ${files.length} diff(s) with \`${editor} --diff\``,
+              message: `Could not open ${failed} of ${files.length} diff(s) with \`${editor}\``,
               variant: "error",
             })
           }
         }
-        const before =
-          prefs.baseline === "turn"
-            ? file.turnBefore
-            : prefs.baseline === "review"
-              ? file.reviewBefore
-              : file.sessionBefore
         let child: ReturnType<typeof spawn>
         try {
-          child = spawn(editor, ["--diff", diffSide(before, file.path), diffSide(file.after, file.path)], {
-            stdio: "ignore",
-            detached: true,
-          })
+          child = spawn(editorCommand[0]!, diffArgs(file), { stdio: "ignore", detached: true })
         } catch {
           settle(false)
           continue
@@ -234,12 +263,48 @@ export default Plugin.define({
       }
     }
 
+    /**
+     * vim in this terminal: the TUI is suspended and the diffs open one after another; `:qa` goes to the next file,
+     * `:cq` skips the rest. The TUI comes back when the last one closes.
+     */
+    const runTerminalDiffs = async (files: EditedFile[]) => {
+      if (inTerminalEditor) return
+      inTerminalEditor = true
+      let error: string | undefined
+      await context.renderer.suspend()
+      try {
+        for (const file of files) {
+          const code = await new Promise<number | null>((resolve, reject) => {
+            const child = spawn(editorCommand[0]!, diffArgs(file), { stdio: "inherit", cwd: path.dirname(file.path) })
+            child.once("error", reject)
+            child.once("exit", (exitCode) => resolve(exitCode))
+          }).catch((err: Error) => {
+            error = `Could not start \`${editor}\`: ${err.message}`
+            return -1
+          })
+          if (code !== 0) break
+        }
+      } finally {
+        await context.renderer.resume()
+        inTerminalEditor = false
+      }
+      if (error) context.ui.toast.show({ title: "Edited files", message: error, variant: "error" })
+    }
+
     const openDiffs = async (files: EditedFile[]) => {
       if (files.length === 0) return
-      if (!inVSCode) {
+      if (kind === "cli" && !inVSCode) {
         context.ui.toast.show({
           title: "Edited files",
-          message: "Diffs open in VS Code: start opencode from the VS Code integrated terminal.",
+          message: `\`${editor} --diff\` needs the VS Code integrated terminal. Set OPENCODE_DIFF_EDITOR to vimdiff or gvimdiff to diff here.`,
+          variant: "warning",
+        })
+        return
+      }
+      if (kind === "gui" && !process.env.DISPLAY) {
+        context.ui.toast.show({
+          title: "Edited files",
+          message: `\`${editor}\` needs $DISPLAY (an X session). Set OPENCODE_DIFF_EDITOR to vimdiff to diff in this terminal.`,
           variant: "warning",
         })
         return
@@ -247,12 +312,18 @@ export default Plugin.define({
       if (files.length > CONFIRM_OPEN_ABOVE) {
         const confirmed = await context.ui.dialog.confirm({
           title: "Open all diffs?",
-          message: `This opens ${files.length} diff tabs in VS Code.`,
+          message:
+            kind === "terminal"
+              ? `This opens ${files.length} diffs in ${editorCommand[0]}, one after another (:qa for the next, :cq to stop).`
+              : kind === "gui"
+                ? `This opens ${files.length} ${editorCommand[0]} windows.`
+                : `This opens ${files.length} diff tabs in ${editorCommand[0]}.`,
           label: { confirm: `Open ${files.length}`, cancel: "Cancel" },
         })
         if (!confirmed) return
       }
-      spawnDiffs(files)
+      if (kind === "terminal") await runTerminalDiffs(files)
+      else spawnDiffs(files)
     }
 
     const currentSessionID = () => {

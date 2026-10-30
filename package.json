@@ -1,7 +1,7 @@
 {
   "name": "opencode-edited-files",
   "version": "0.2.0",
-  "description": "OpenCode V2 plugin: sidebar of every file a session edited, with +/- counts and one-click VS Code diffs",
+  "description": "OpenCode V2 plugin: sidebar of every file a session edited, with +/- counts and one-click diffs in VS Code, vim or gvim",
   "type": "module",
   "license": "MIT",
   "author": "Aditya Aggarwal",
@@ -18,6 +18,7 @@
     "opencode-plugin",
     "plugin",
     "diff",
+    "vim",
     "vscode",
     "sidebar"
   ],
