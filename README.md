@@ -149,7 +149,9 @@ By default diffs open with `code --diff` in a VS Code terminal and with `vimdiff
 
 The value may include arguments, e.g. `vim -u ~/.vimrc.diff`. In vim the left window is the read-only "before"
 copy and the right window is the real file, so you can fix things right there. With several files (`Ctrl+A`), vim
-opens them one after another: `:qa` goes to the next file and `:cq` skips the rest.
+opens them one after another: `:qa` goes to the next file and `:cq` skips the rest. The "before" copies never get a
+vim swap file, so a crashed or killed vim doesn't leave a "Swap file already exists" prompt on them.
+When vim quits, the sidebar re-counts the files, so changes you saved there show up right away.
 
 To choose, either:
 

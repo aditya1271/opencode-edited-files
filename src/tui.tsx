@@ -56,9 +56,17 @@ const VIM_KIND: Record<string, EditorKind> = {
 }
 const editorKind = (command: string[]): EditorKind => VIM_KIND[path.basename(command[0] ?? "")] ?? "cli"
 
-/** vim arguments for one diff: the before copy (left) is read-only; the right side is the real file. */
+/** The plugin's own copies (backups and empty placeholders) as vim autocmd patterns. */
+const OWN_COPIES = "*/opencode-edited-files/backups/*,*/opencode-edited-files-*/empty/*"
+
+/**
+ * vim arguments for one diff: the before copy (left) is read-only; the right side is the real file.
+ * The copies get no swap file, and a stale one (from a killed vim) opens read-only instead of prompting.
+ */
 const vimDiffArgs = (command: string[], left: string, right: string) => [
   ...command.slice(1),
+  "--cmd", `autocmd BufNewFile,BufReadPre ${OWN_COPIES} setlocal noswapfile`,
+  "--cmd", `autocmd SwapExists ${OWN_COPIES} let v:swapchoice = 'o'`,
   ...(/diff$/.test(path.basename(command[0]!)) ? [] : ["-d"]),
   "-c", "wincmd t | setlocal readonly nomodifiable | wincmd b",
   left,
@@ -93,6 +101,8 @@ export default Plugin.define({
     const kind = editorKind(editorCommand)
     const inVSCode = !!process.env.VSCODE_IPC_HOOK_CLI
     let inTerminalEditor = false
+    /** Bumped when terminal vim quits; files saved there send no event, so the sidebar re-counts them. */
+    const [editorClosed, setEditorClosed] = createSignal(0)
     const rpc = context.client.rpc(EditedFiles)
     const [prefs, setPrefs] = context.storage.store<Prefs>("prefs", {
       initial: { expanded: true, baseline: "session", showAll: false },
@@ -287,6 +297,7 @@ export default Plugin.define({
       } finally {
         await context.renderer.resume()
         inTerminalEditor = false
+        setEditorClosed((n) => n + 1)
       }
       if (error) context.ui.toast.show({ title: "Edited files", message: error, variant: "error" })
     }
@@ -533,6 +544,7 @@ export default Plugin.define({
         const poll = setInterval(refresh, REVIEW_RECHECK_MS)
         onCleanup(() => clearInterval(poll))
       })
+      createEffect(on(editorClosed, () => refresh(), { defer: true }))
       const stopChanged = rpc.events.on("changed", () => refresh())
       const stopTurn = context.data.on("session.execution.succeeded", () => refresh())
       const stopRevert = context.data.on("session.revert.committed", () => refresh())
