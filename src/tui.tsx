@@ -458,11 +458,16 @@ export default Plugin.define({
       ],
     }))
 
+    /**
+     * Acts on mouse release, like OpenCode's own buttons. A dialog opened on press could be drawn before the release
+     * (likely while a reply streams), and the release would then land on the dialog's backdrop and close it.
+     */
     function Clickable(props: { onClick: () => void; children: any }) {
       return (
         <box
           flexDirection="row"
-          onMouseDown={(event: { stopPropagation(): void }) => {
+          onMouseDown={(event: { stopPropagation(): void }) => event.stopPropagation()}
+          onMouseUp={(event: { stopPropagation(): void }) => {
             event.stopPropagation()
             props.onClick()
           }}
