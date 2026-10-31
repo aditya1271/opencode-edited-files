@@ -578,7 +578,9 @@ export default Plugin.define({
       | { kind: "folder"; name: string; path: string; depth: number; hasContent: boolean }
       | { kind: "file"; file: EditedFile; depth: number }
 
-    /** Depth-first flatten. Folders inside a collapsed ancestor are skipped entirely. */
+    /** Depth-first flatten. Folders inside a collapsed ancestor are skipped entirely.
+     *  The unnamed root passes its depth through so top-level items align with the heading.
+     *  Named folders indent their children by one level. */
     const flattenTree = (tree: FileTree, collapsed: Set<string>, depth = 0): TreeItem[] => {
       const items: TreeItem[] = []
       const hasContent = tree.files.length > 0 || tree.children.length > 0
@@ -586,7 +588,7 @@ export default Plugin.define({
       const expanded = tree.name ? !collapsed.has(tree.path) : true
       if (expanded) {
         for (const file of tree.files) items.push({ kind: "file", file, depth })
-        for (const child of tree.children) items.push(...flattenTree(child, collapsed, depth + 1))
+        for (const child of tree.children) items.push(...flattenTree(child, collapsed, tree.name ? depth + 1 : depth))
       }
       return items
     }
@@ -612,11 +614,19 @@ export default Plugin.define({
                     : "▼ "
                   : "  "
                 return (
-                  <Clickable onClick={() => item.hasContent && props.toggle(item.path)}>
+                  <box
+                    flexDirection="row"
+                    onMouseOver={() => {}}
+                    onMouseOut={() => {}}
+                    onMouseUp={(event: { stopPropagation(): void }) => {
+                      event.stopPropagation()
+                      if (item.hasContent) props.toggle(item.path)
+                    }}
+                  >
                     <text truncate fg={color.muted()}>
                       {`${indent(item.depth)}${arrow}${item.name}/`}
                     </text>
-                  </Clickable>
+                  </box>
                 )
               }
               return <FileRow file={item.file} sessionID={props.sessionID} indent={item.depth * TREE_INDENT} />
