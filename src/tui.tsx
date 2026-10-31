@@ -529,13 +529,14 @@ export default Plugin.define({
      * A single file row: mark-circle, status letter, filename and +/- stats. The caller adds padding. Every `<text>`
      * has `truncate` so the row never exceeds one terminal line, even with long filenames.
      */
-    function FileRow(props: { file: EditedFile; sessionID: string }) {
+    function FileRow(props: { file: EditedFile; sessionID: string; indent?: number }) {
       const [hover, setHover] = createSignal(false)
       const [markHover, setMarkHover] = createSignal(false)
       const counts = () => countsOf(props.file, props.sessionID)
       const stats = () => (props.file.binary ? " bin" : ` +${counts().add} -${counts().del}`)
       const label = () => truncateLeft(path.basename(props.file.path), SIDEBAR_WIDTH - 8 - stats().length)
       const dim = () => props.file.reviewed
+      const prefix = () => " ".repeat(props.indent ?? 0)
       return (
         <box
           flexDirection="row"
@@ -555,7 +556,7 @@ export default Plugin.define({
             }}
           >
             <text truncate fg={markHover() ? color.accent() : props.file.reviewed ? color.added() : color.muted()}>
-              {props.file.reviewed ? "✓ " : "○ "}
+              {`${prefix()}${props.file.reviewed ? "✓ " : "○ "}`}
             </text>
           </box>
           <text truncate fg={dim() ? color.muted() : statusColor(props.file)}>{`${STATUS_MARK[props.file.status]} `}</text>
@@ -569,59 +570,58 @@ export default Plugin.define({
     }
 
     /**
-     * Renders a compact folder tree with indentation-only layout (no guide lines). Each level adds 2 columns of indent.
-     * Folders are collapsible. A single `<text truncate>` per row prevents wrapping even with long filenames.
+     * One flat entry in the tree: folder or file with its depth for indentation.
+     * Indent is baked into the text content, not <box> padding, so root items align with the Workspace heading.
      */
-    function FileTreeView(props: {
+    /** One flat row in the tree. `hasContent` is stored on folders so the renderer knows whether to show an arrow. */
+    type TreeItem =
+      | { kind: "folder"; name: string; path: string; depth: number; hasContent: boolean }
+      | { kind: "file"; file: EditedFile; depth: number }
+
+    /** Depth-first flatten. Folders inside a collapsed ancestor are skipped entirely. */
+    const flattenTree = (tree: FileTree, collapsed: Set<string>, depth = 0): TreeItem[] => {
+      const items: TreeItem[] = []
+      const hasContent = tree.files.length > 0 || tree.children.length > 0
+      if (tree.name) items.push({ kind: "folder", name: tree.name, path: tree.path, depth, hasContent })
+      const expanded = tree.name ? !collapsed.has(tree.path) : true
+      if (expanded) {
+        for (const file of tree.files) items.push({ kind: "file", file, depth })
+        for (const child of tree.children) items.push(...flattenTree(child, collapsed, depth + 1))
+      }
+      return items
+    }
+
+    /** Renders a flat list of folders and files, each with text-based indentation. */
+    function FileTreeList(props: {
       tree: FileTree
       sessionID: string
-      depth?: number
       collapsed: Set<string>
       toggle: (folderPath: string) => void
     }) {
-      const depth = () => props.depth ?? 0
-      const indent = () => depth() * 2
-      const hasContent = () => props.tree.files.length > 0 || props.tree.children.length > 0
-      const expanded = () => !props.collapsed.has(props.tree.path)
-
-      const folderText = () => {
-        if (!props.tree.name) return ""
-        const arrow = hasContent() ? (expanded() ? "▼ " : "▶ ") : "  "
-        return `${arrow}${props.tree.name}/`
-      }
-
-      /** Root items sit at the same indent as the Workspace/Outside workspace heading; only nested folders indent. */
-      const rowPadding = () => depth() * TREE_INDENT
+      const items = () => flattenTree(props.tree, props.collapsed)
+      const indent = (depth: number) => " ".repeat(depth * TREE_INDENT)
 
       return (
         <box flexDirection="column">
-          <Show when={props.tree.name}>
-            <Clickable onClick={() => hasContent() && props.toggle(props.tree.path)}>
-              <box flexDirection="row" paddingLeft={rowPadding()}>
-                <text truncate fg={color.muted()}>{folderText()}</text>
-              </box>
-            </Clickable>
-          </Show>
-          <Show when={expanded()}>
-            <For each={props.tree.files}>
-              {(file) => (
-                <box flexDirection="row" paddingLeft={rowPadding()}>
-                  <FileRow file={file} sessionID={props.sessionID} />
-                </box>
-              )}
-            </For>
-            <For each={props.tree.children}>
-              {(child) => (
-                <FileTreeView
-                  tree={child}
-                  sessionID={props.sessionID}
-                  depth={depth() + 1}
-                  collapsed={props.collapsed}
-                  toggle={props.toggle}
-                />
-              )}
-            </For>
-          </Show>
+          <For each={items()}>
+            {(item) => {
+              if (item.kind === "folder") {
+                const arrow = item.hasContent
+                  ? props.collapsed.has(item.path)
+                    ? "▶ "
+                    : "▼ "
+                  : "  "
+                return (
+                  <Clickable onClick={() => item.hasContent && props.toggle(item.path)}>
+                    <text truncate fg={color.muted()}>
+                      {`${indent(item.depth)}${arrow}${item.name}/`}
+                    </text>
+                  </Clickable>
+                )
+              }
+              return <FileRow file={item.file} sessionID={props.sessionID} indent={item.depth * TREE_INDENT} />
+            }}
+          </For>
         </box>
       )
     }
@@ -771,7 +771,7 @@ export default Plugin.define({
                       <text fg={color.removed()}>{`-${sum(kindFiles(!!outside)).del}`}</text>
                     </Clickable>
                   </Show>
-                  <FileTreeView
+                  <FileTreeList
                     tree={fileTree(
                       visible().filter(
                         (file) => outside === undefined || (workspacePath(file, props.sessionID) === undefined) === outside,
