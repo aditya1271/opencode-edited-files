@@ -590,11 +590,14 @@ export default Plugin.define({
         return `${arrow}${props.tree.name}/`
       }
 
+      /** Root items sit at the same indent as the Workspace/Outside workspace heading; only nested folders indent. */
+      const rowPadding = () => depth() * TREE_INDENT
+
       return (
         <box flexDirection="column">
           <Show when={props.tree.name}>
             <Clickable onClick={() => hasContent() && props.toggle(props.tree.path)}>
-              <box flexDirection="row" paddingLeft={2 + indent()}>
+              <box flexDirection="row" paddingLeft={rowPadding()}>
                 <text truncate fg={color.muted()}>{folderText()}</text>
               </box>
             </Clickable>
@@ -602,7 +605,7 @@ export default Plugin.define({
           <Show when={expanded()}>
             <For each={props.tree.files}>
               {(file) => (
-                <box flexDirection="row" paddingLeft={2 + indent() + 2}>
+                <box flexDirection="row" paddingLeft={rowPadding()}>
                   <FileRow file={file} sessionID={props.sessionID} />
                 </box>
               )}
