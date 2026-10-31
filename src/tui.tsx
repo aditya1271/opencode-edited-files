@@ -35,11 +35,8 @@ interface FileTree {
   children: FileTree[]
 }
 
-/** VS Code-style tree guide characters. Each level adds 2 columns. */
-const TREE_CONTINUE = "│ "
-const TREE_END = "  "
-const TREE_MID = "├─"
-const TREE_LAST = "└─"
+/** Indent per tree level, in screen columns. */
+const TREE_INDENT = 2
 
 const SIDEBAR_WIDTH = 38
 const COMPACT_ROWS = 10
@@ -528,7 +525,10 @@ export default Plugin.define({
       )
     }
 
-    /** A single file row with mark-circle, status letter, filename and +/- stats. No padding – the caller adds it. */
+    /**
+     * A single file row: mark-circle, status letter, filename and +/- stats. The caller adds padding. Every `<text>`
+     * has `truncate` so the row never exceeds one terminal line, even with long filenames.
+     */
     function FileRow(props: { file: EditedFile; sessionID: string }) {
       const [hover, setHover] = createSignal(false)
       const [markHover, setMarkHover] = createSignal(false)
@@ -554,88 +554,69 @@ export default Plugin.define({
               void setReviewed(props.sessionID, [props.file], !props.file.reviewed)
             }}
           >
-            <text fg={markHover() ? color.accent() : props.file.reviewed ? color.added() : color.muted()}>
+            <text truncate fg={markHover() ? color.accent() : props.file.reviewed ? color.added() : color.muted()}>
               {props.file.reviewed ? "✓ " : "○ "}
             </text>
           </box>
-          <text wrapMode="none" fg={dim() ? color.muted() : statusColor(props.file)}>{`${STATUS_MARK[props.file.status]} `}</text>
-          <text wrapMode="none" minWidth={0} truncate fg={hover() && !markHover() ? color.accent() : dim() ? color.muted() : color.header()}>{label()}</text>
-          <Show when={!props.file.binary && !dim()} fallback={<text wrapMode="none" fg={color.muted()}>{stats()}</text>}>
-            <text wrapMode="none" fg={color.added()}>{` +${counts().add}`}</text>
-            <text wrapMode="none" fg={color.removed()}>{` -${counts().del}`}</text>
+          <text truncate fg={dim() ? color.muted() : statusColor(props.file)}>{`${STATUS_MARK[props.file.status]} `}</text>
+          <text truncate fg={hover() && !markHover() ? color.accent() : dim() ? color.muted() : color.header()}>{label()}</text>
+          <Show when={!props.file.binary && !dim()} fallback={<text truncate fg={color.muted()}>{stats()}</text>}>
+            <text truncate fg={color.added()}>{` +${counts().add}`}</text>
+            <text truncate fg={color.removed()}>{` -${counts().del}`}</text>
           </Show>
         </box>
       )
     }
 
     /**
-     * Renders a folder tree with VS Code-style guide lines (│ ├─ └─) and collapsible folders. `prefix` is accumulated
-     * from ancestors: for each ancestor that is NOT the last sibling `"│ "`, otherwise `"  "`. Each level is 2 columns,
-     * the tightest spacing that keeps the tree readable. `isLast` is whether this folder is the last child of its parent.
+     * Renders a compact folder tree with indentation-only layout (no guide lines). Each level adds 2 columns of indent.
+     * Folders are collapsible. A single `<text truncate>` per row prevents wrapping even with long filenames.
      */
     function FileTreeView(props: {
       tree: FileTree
       sessionID: string
-      prefix?: string
       depth?: number
-      isLast?: boolean
       collapsed: Set<string>
       toggle: (folderPath: string) => void
     }) {
       const depth = () => props.depth ?? 0
-      const prefix = () => props.prefix ?? ""
+      const indent = () => depth() * 2
       const hasContent = () => props.tree.files.length > 0 || props.tree.children.length > 0
       const expanded = () => !props.collapsed.has(props.tree.path)
 
-      const folderRow = () => {
-        if (!props.tree.name) return undefined
-        const connector = depth() === 0 ? "" : props.isLast ? TREE_LAST : TREE_MID
-        return (
-          <box flexDirection="row" paddingLeft={2}>
-            <text fg={color.muted()} wrapMode="none">
-              {`${prefix()}${connector}${hasContent() ? (expanded() ? "▼ " : "▶ ") : "  "}${props.tree.name}/`}
-            </text>
-          </box>
-        )
+      const folderText = () => {
+        if (!props.tree.name) return ""
+        const arrow = hasContent() ? (expanded() ? "▼ " : "▶ ") : "  "
+        return `${arrow}${props.tree.name}/`
       }
 
       return (
         <box flexDirection="column">
           <Show when={props.tree.name}>
             <Clickable onClick={() => hasContent() && props.toggle(props.tree.path)}>
-              {folderRow()}
+              <box flexDirection="row" paddingLeft={2 + indent()}>
+                <text truncate fg={color.muted()}>{folderText()}</text>
+              </box>
             </Clickable>
           </Show>
           <Show when={expanded()}>
             <For each={props.tree.files}>
-              {(file, index) => {
-                const fileIsLast =
-                  index() === props.tree.files.length - 1 && props.tree.children.length === 0
-                const connector = depth() === 0 ? "  " : fileIsLast ? TREE_LAST : TREE_MID
-                return (
-                  <box flexDirection="row" paddingLeft={2}>
-                    <text fg={color.muted()} wrapMode="none">{`${prefix()}${connector}`}</text>
-                    <FileRow file={file} sessionID={props.sessionID} />
-                  </box>
-                )
-              }}
+              {(file) => (
+                <box flexDirection="row" paddingLeft={2 + indent() + 2}>
+                  <FileRow file={file} sessionID={props.sessionID} />
+                </box>
+              )}
             </For>
             <For each={props.tree.children}>
-              {(child, index) => {
-                const childIsLast = index() === props.tree.children.length - 1
-                const childPrefix = prefix() + (childIsLast ? TREE_END : TREE_CONTINUE)
-                return (
-                  <FileTreeView
-                    tree={child}
-                    sessionID={props.sessionID}
-                    prefix={childPrefix}
-                    depth={depth() + 1}
-                    isLast={childIsLast}
-                    collapsed={props.collapsed}
-                    toggle={props.toggle}
-                  />
-                )
-              }}
+              {(child) => (
+                <FileTreeView
+                  tree={child}
+                  sessionID={props.sessionID}
+                  depth={depth() + 1}
+                  collapsed={props.collapsed}
+                  toggle={props.toggle}
+                />
+              )}
             </For>
           </Show>
         </box>
