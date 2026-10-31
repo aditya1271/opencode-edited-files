@@ -23,8 +23,13 @@ docs/
   - **Last turn**: only files edited since your latest prompt, compared with how they were before that turn.
   - **Since review**: every edited file, compared with how it was when you last marked it reviewed, so after
     further changes you only see what's new. Files you never reviewed are compared with session start.
-- **Grouped by folder**, workspace files first: when some files are outside the session's folder (plans, notes,
-  caches), a **Workspace** and an **Outside workspace** heading split them, each with its count and +/- totals.
+
+  The view and the `Show`/`Hide` reviewed choice are remembered per session (a subagent follows its parent session).
+  A session you haven't changed starts on **Whole session** with reviewed files hidden.
+- **Nested folder tree** with VS Code-style guide lines (`│ ├─ └─`) so sibling relationships are easy to read.
+  Folders are shown indented beneath their parent; each folder is **collapsible** (`▼`/`▶`). The collapsed state
+  is kept while the session is open. When some files are outside the session's folder (plans, notes, caches),
+  a **Workspace** and an **Outside workspace** heading split them, each with its count and +/- totals.
   Click a heading to collapse it (remembered). 10 rows by default, workspace files first, with a
   `Show all / Show less` toggle; collapsed files take no rows. Click the header to collapse the section.
 - **Click a file to open its diff** in VS Code (`code --diff`), in `vimdiff` inside the OpenCode terminal, or in a

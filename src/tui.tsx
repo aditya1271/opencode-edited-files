@@ -9,26 +9,44 @@ import { EditedFiles, type EditedFile } from "./rpc.ts"
 /** "session": every edited file vs session start. "turn": only the last turn's files vs before that turn. */
 type View = "session" | "turn" | "review"
 
-interface Prefs {
-  expanded: boolean
-  baseline: View
-  showAll?: boolean
+/** View choices for one root session. */
+interface SessionView {
+  baseline?: View
   showReviewed?: boolean
-  /** The Workspace and Outside workspace headings the user collapsed. */
-  collapsed?: { workspace?: boolean; outside?: boolean }
+  /** When it was last changed, so the oldest entries can be dropped. */
+  used: number
 }
 
-interface Group {
-  dir: string
-  files: EditedFile[]
-  /** Outside the session's directory. */
-  outside: boolean
+interface Prefs {
+  expanded: boolean
+  showAll?: boolean
+  /** The Workspace and Outside workspace headings the user collapsed. */
+  collapsed?: { workspace?: boolean; outside?: boolean }
+  /** Per root session, so switching sessions doesn't carry one session's view into another. */
+  sessions?: Record<string, SessionView>
 }
+
+interface FileTree {
+  /** Folder name relative to its parent. The root has no label. */
+  name?: string
+  /** Accumulated path from the root, for stable folder identity. */
+  path: string
+  files: EditedFile[]
+  children: FileTree[]
+}
+
+/** VS Code-style tree guide characters. Each level adds 2 columns. */
+const TREE_CONTINUE = "│ "
+const TREE_END = "  "
+const TREE_MID = "├─"
+const TREE_LAST = "└─"
 
 const SIDEBAR_WIDTH = 38
 const COMPACT_ROWS = 10
 const CONFIRM_OPEN_ABOVE = 10
 const REVIEW_RECHECK_MS = 5000
+/** Sessions whose view choices are remembered; older ones fall back to the defaults. */
+const MAX_SESSION_VIEWS = 200
 const STATUS_MARK: Record<EditedFile["status"], string> = { added: "A", modified: "M", deleted: "D" }
 
 /**
@@ -105,9 +123,25 @@ export default Plugin.define({
     const [editorClosed, setEditorClosed] = createSignal(0)
     const rpc = context.client.rpc(EditedFiles)
     const [prefs, setPrefs] = context.storage.store<Prefs>("prefs", {
-      initial: { expanded: true, baseline: "session", showAll: false },
+      initial: { expanded: true, showAll: false },
     })
     const updatePrefs = (mutate: (draft: Prefs) => void) => void setPrefs(mutate).catch(() => {})
+
+    const viewOf = (sessionID: string) => prefs.sessions?.[rootOf(sessionID)]
+    const baselineOf = (sessionID: string): View => viewOf(sessionID)?.baseline ?? "session"
+    const showReviewedOf = (sessionID: string) => !!viewOf(sessionID)?.showReviewed
+    const updateView = (sessionID: string, change: (view: SessionView) => Omit<SessionView, "used">) =>
+      setPrefs((draft) => {
+        const key = rootOf(sessionID)
+        const sessions = { ...draft.sessions }
+        sessions[key] = { ...change(sessions[key] ?? { used: 0 }), used: Date.now() }
+        const keys = Object.keys(sessions)
+        if (keys.length > MAX_SESSION_VIEWS) {
+          keys.sort((a, b) => sessions[a]!.used - sessions[b]!.used)
+          for (const old of keys.slice(0, keys.length - MAX_SESSION_VIEWS)) delete sessions[old]
+        }
+        draft.sessions = sessions
+      }).catch(() => {})
 
     const color = {
       header: () => resolveColor(context.theme, "text.base", "#eeffff"),
@@ -120,15 +154,15 @@ export default Plugin.define({
     const statusColor = (file: EditedFile) =>
       file.status === "added" ? color.added() : file.status === "deleted" ? color.removed() : color.modified()
 
-    const countsOf = (file: EditedFile) =>
-      prefs.baseline === "turn"
+    const countsOf = (file: EditedFile, sessionID: string) =>
+      baselineOf(sessionID) === "turn"
         ? { add: file.turnAdditions, del: file.turnDeletions }
-        : prefs.baseline === "review"
+        : baselineOf(sessionID) === "review"
           ? { add: file.reviewAdditions, del: file.reviewDeletions }
           : { add: file.additions, del: file.deletions }
 
     const VIEW_LABELS: Record<View, string> = { session: "Whole session", turn: "Last turn", review: "Since review" }
-    const viewLabel = () => VIEW_LABELS[prefs.baseline] ?? VIEW_LABELS.session
+    const viewLabel = (sessionID: string) => VIEW_LABELS[baselineOf(sessionID)] ?? VIEW_LABELS.session
 
     const sessionDirectory = (sessionID: string) => context.data.session.get(sessionID)?.location?.directory
 
@@ -191,13 +225,13 @@ export default Plugin.define({
 
     /** Files that belong to the current view (whole session, or only the last turn). */
     const inView = (files: EditedFile[], sessionID: string) => {
-      if (prefs.baseline !== "turn") return files
+      if (baselineOf(sessionID) !== "turn") return files
       const start = lastTurnStart(sessionID)
       return files.filter((file) => file.updated >= start)
     }
 
-    const withoutHiddenReviewed = (files: EditedFile[]) =>
-      prefs.showReviewed ? files : files.filter((file) => !file.reviewed)
+    const withoutHiddenReviewed = (files: EditedFile[], sessionID: string) =>
+      showReviewedOf(sessionID) ? files : files.filter((file) => !file.reviewed)
 
     const workspacePath = (file: EditedFile, sessionID: string) => {
       const base = sessionDirectory(sessionID)
@@ -213,40 +247,48 @@ export default Plugin.define({
       return [...inside, ...files.filter((file) => !inside.includes(file))]
     }
 
-    /** Groups by folder, workspace folders first, each in the order of first appearance. */
-    const groupByDir = (files: EditedFile[], sessionID: string): Group[] => {
-      const groups = new Map<string, Group>()
-      for (const file of workspaceFirst(files, sessionID)) {
-        const dir = path.dirname(displayPath(file, sessionID))
-        let group = groups.get(dir)
-        if (!group) groups.set(dir, (group = { dir, files: [], outside: workspacePath(file, sessionID) === undefined }))
-        group.files.push(file)
+    /**
+     * Folders as a real tree, keeping the incoming file order at every level. `displayPath` is relative for workspace
+     * files and formatted absolute for outside files, so the caller builds one tree for each side of the split.
+     */
+    const fileTree = (files: EditedFile[], sessionID: string): FileTree => {
+      const root: FileTree = { path: "", files: [], children: [] }
+      for (const file of files) {
+        const directory = path.dirname(displayPath(file, sessionID))
+        const parts = directory === "." ? [] : directory.split(path.sep).filter((part) => part && part !== ".")
+        let node = root
+        let accumulated = ""
+        for (const part of parts) {
+          accumulated = accumulated ? `${accumulated}/${part}` : part
+          let child = node.children.find((candidate) => candidate.name === part)
+          if (!child) node.children.push((child = { name: part, path: accumulated, files: [], children: [] }))
+          node = child
+        }
+        node.files.push(file)
       }
-      return [...groups.values()]
+      return root
     }
 
     const VIEWS: View[] = ["session", "turn", "review"]
-    const setView = (view: View) =>
-      setPrefs((draft) => {
-        draft.baseline = view
-      }).catch(() => {})
-    const toggleView = () => setView(VIEWS[(VIEWS.indexOf(prefs.baseline) + 1) % VIEWS.length]!)
-    const toggleShowReviewed = () =>
-      setPrefs((draft) => {
-        draft.showReviewed = !draft.showReviewed
-      }).catch(() => {})
+    const setView = (sessionID: string, view: View) => updateView(sessionID, (current) => ({ ...current, baseline: view }))
+    const toggleView = (sessionID: string) =>
+      setView(sessionID, VIEWS[(VIEWS.indexOf(baselineOf(sessionID)) + 1) % VIEWS.length]!)
+    const toggleShowReviewed = (sessionID: string) =>
+      updateView(sessionID, (current) => ({ ...current, showReviewed: !current.showReviewed }))
 
-    const beforeOf = (file: EditedFile) =>
-      prefs.baseline === "turn" ? file.turnBefore : prefs.baseline === "review" ? file.reviewBefore : file.sessionBefore
+    const beforeOf = (file: EditedFile, sessionID: string) => {
+      const baseline = baselineOf(sessionID)
+      return baseline === "turn" ? file.turnBefore : baseline === "review" ? file.reviewBefore : file.sessionBefore
+    }
 
-    const diffArgs = (file: EditedFile) => {
-      const left = diffSide(beforeOf(file), file.path)
+    const diffArgs = (file: EditedFile, sessionID: string) => {
+      const left = diffSide(beforeOf(file, sessionID), file.path)
       const right = diffSide(file.after, file.path)
       return kind === "cli" ? [...editorCommand.slice(1), "--diff", left, right] : vimDiffArgs(editorCommand, left, right)
     }
 
     /** code/cursor tabs or gvim windows: started detached, all at once. */
-    const spawnDiffs = (files: EditedFile[]) => {
+    const spawnDiffs = (files: EditedFile[], sessionID: string) => {
       let failed = 0
       let done = 0
       for (const file of files) {
@@ -262,7 +304,7 @@ export default Plugin.define({
         }
         let child: ReturnType<typeof spawn>
         try {
-          child = spawn(editorCommand[0]!, diffArgs(file), { stdio: "ignore", detached: true })
+          child = spawn(editorCommand[0]!, diffArgs(file, sessionID), { stdio: "ignore", detached: true })
         } catch {
           settle(false)
           continue
@@ -277,7 +319,7 @@ export default Plugin.define({
      * vim in this terminal: the TUI is suspended and the diffs open one after another; `:qa` goes to the next file,
      * `:cq` skips the rest. The TUI comes back when the last one closes.
      */
-    const runTerminalDiffs = async (files: EditedFile[]) => {
+    const runTerminalDiffs = async (files: EditedFile[], sessionID: string) => {
       if (inTerminalEditor) return
       inTerminalEditor = true
       let error: string | undefined
@@ -285,7 +327,10 @@ export default Plugin.define({
       try {
         for (const file of files) {
           const code = await new Promise<number | null>((resolve, reject) => {
-            const child = spawn(editorCommand[0]!, diffArgs(file), { stdio: "inherit", cwd: path.dirname(file.path) })
+            const child = spawn(editorCommand[0]!, diffArgs(file, sessionID), {
+              stdio: "inherit",
+              cwd: path.dirname(file.path),
+            })
             child.once("error", reject)
             child.once("exit", (exitCode) => resolve(exitCode))
           }).catch((err: Error) => {
@@ -302,7 +347,7 @@ export default Plugin.define({
       if (error) context.ui.toast.show({ title: "Edited files", message: error, variant: "error" })
     }
 
-    const openDiffs = async (files: EditedFile[]) => {
+    const openDiffs = async (files: EditedFile[], sessionID: string) => {
       if (files.length === 0) return
       if (kind === "cli" && !inVSCode) {
         context.ui.toast.show({
@@ -333,8 +378,8 @@ export default Plugin.define({
         })
         if (!confirmed) return
       }
-      if (kind === "terminal") await runTerminalDiffs(files)
-      else spawnDiffs(files)
+      if (kind === "terminal") await runTerminalDiffs(files, sessionID)
+      else spawnDiffs(files, sessionID)
     }
 
     const currentSessionID = () => {
@@ -346,35 +391,33 @@ export default Plugin.define({
       const sessionID = currentSessionID()
       if (!sessionID) return
       const all = inView(await fetchFiles(sessionID).catch(() => [] as EditedFile[]), sessionID)
-      const files = withoutHiddenReviewed(all)
+      const files = withoutHiddenReviewed(all, sessionID)
       if (files.length === 0) {
         context.ui.toast.show({
           title: "Edited files",
           message:
             all.length > 0
-              ? prefs.baseline === "review"
+              ? baselineOf(sessionID) === "review"
                 ? "No changes since review. Use /edits-reviewed to show reviewed files."
                 : "All files are reviewed. Use /edits-reviewed to show them."
-              : prefs.baseline === "turn"
+              : baselineOf(sessionID) === "turn"
                 ? "No files edited in the last turn."
                 : "No files edited in this session yet.",
         })
         return
       }
       const picked = await context.ui.dialog.select({
-        title: `Edited files · ${viewLabel()}`,
-        options: groupByDir(files, sessionID).flatMap((group) =>
-          group.files.map((file) => ({
-            title: `${file.reviewed ? "✓" : STATUS_MARK[file.status]} ${path.basename(file.path)}`,
-            value: file.path,
-            category: group.outside ? `Outside workspace · ${group.dir}` : group.dir === "." ? "./" : group.dir,
-            description:
-              (file.binary ? "binary" : `+${countsOf(file).add} -${countsOf(file).del}`) +
-              (file.reviewed ? " · reviewed" : ""),
-          })),
-        ),
+        title: `Edited files · ${viewLabel(sessionID)}`,
+        options: files.map((file) => ({
+          title: `${file.reviewed ? "✓" : STATUS_MARK[file.status]} ${path.basename(file.path)}`,
+          value: file.path,
+          category: workspacePath(file, sessionID) === undefined ? `Outside workspace · ${path.dirname(file.path)}` : path.dirname(displayPath(file, sessionID)) === "." ? "./" : path.dirname(displayPath(file, sessionID)),
+          description:
+            (file.binary ? "binary" : `+${countsOf(file, sessionID).add} -${countsOf(file, sessionID).del}`) +
+            (file.reviewed ? " · reviewed" : ""),
+        })),
         actions: [
-          { bind: "ctrl+a", title: "Open all", selection: "none", onTrigger: () => void openDiffs(files) },
+          { bind: "ctrl+a", title: "Open all", selection: "none", onTrigger: () => void openDiffs(files, sessionID) },
           {
             bind: "ctrl+r",
             title: "Mark reviewed",
@@ -401,7 +444,7 @@ export default Plugin.define({
             title: "Switch view",
             selection: "none",
             onTrigger: async () => {
-              await toggleView()
+              await toggleView(sessionID)
               context.ui.dialog.clear()
               void showPicker()
             },
@@ -409,7 +452,13 @@ export default Plugin.define({
         ],
       })
       const file = files.find((f) => f.path === picked)
-      if (file) void openDiffs([file])
+      if (file) void openDiffs([file], sessionID)
+    }
+
+    /** Runs `action` for the session on screen; view commands do nothing outside a session. */
+    const inCurrentSession = (action: (sessionID: string) => unknown) => () => {
+      const sessionID = currentSessionID()
+      if (sessionID) void action(sessionID)
     }
 
     context.keymap.layer(() => ({
@@ -430,7 +479,8 @@ export default Plugin.define({
           group: "Edited files",
           palette: true,
           slash: { name: "edits-view" },
-          run: () => void toggleView(),
+          enabled: () => currentSessionID() !== undefined,
+          run: inCurrentSession(toggleView),
         },
         {
           id: "edited-files.reviewed",
@@ -438,7 +488,8 @@ export default Plugin.define({
           group: "Edited files",
           palette: true,
           slash: { name: "edits-reviewed" },
-          run: () => void toggleShowReviewed(),
+          enabled: () => currentSessionID() !== undefined,
+          run: inCurrentSession(toggleShowReviewed),
         },
         {
           id: "edited-files.review-all",
@@ -477,21 +528,22 @@ export default Plugin.define({
       )
     }
 
+    /** A single file row with mark-circle, status letter, filename and +/- stats. No padding – the caller adds it. */
     function FileRow(props: { file: EditedFile; sessionID: string }) {
       const [hover, setHover] = createSignal(false)
       const [markHover, setMarkHover] = createSignal(false)
-      const stats = () => (props.file.binary ? " bin" : ` +${countsOf(props.file).add} -${countsOf(props.file).del}`)
+      const counts = () => countsOf(props.file, props.sessionID)
+      const stats = () => (props.file.binary ? " bin" : ` +${counts().add} -${counts().del}`)
       const label = () => truncateLeft(path.basename(props.file.path), SIDEBAR_WIDTH - 8 - stats().length)
       const dim = () => props.file.reviewed
       return (
         <box
           flexDirection="row"
-          paddingLeft={2}
           onMouseOver={() => setHover(true)}
           onMouseOut={() => setHover(false)}
           onMouseUp={(event: { stopPropagation(): void }) => {
             event.stopPropagation()
-            void openDiffs([props.file])
+            void openDiffs([props.file], props.sessionID)
           }}
         >
           <box
@@ -506,11 +558,85 @@ export default Plugin.define({
               {props.file.reviewed ? "✓ " : "○ "}
             </text>
           </box>
-          <text fg={dim() ? color.muted() : statusColor(props.file)}>{`${STATUS_MARK[props.file.status]} `}</text>
-          <text fg={hover() && !markHover() ? color.accent() : dim() ? color.muted() : color.header()}>{label()}</text>
-          <Show when={!props.file.binary && !dim()} fallback={<text fg={color.muted()}>{stats()}</text>}>
-            <text fg={color.added()}>{` +${countsOf(props.file).add}`}</text>
-            <text fg={color.removed()}>{` -${countsOf(props.file).del}`}</text>
+          <text wrapMode="none" fg={dim() ? color.muted() : statusColor(props.file)}>{`${STATUS_MARK[props.file.status]} `}</text>
+          <text wrapMode="none" minWidth={0} truncate fg={hover() && !markHover() ? color.accent() : dim() ? color.muted() : color.header()}>{label()}</text>
+          <Show when={!props.file.binary && !dim()} fallback={<text wrapMode="none" fg={color.muted()}>{stats()}</text>}>
+            <text wrapMode="none" fg={color.added()}>{` +${counts().add}`}</text>
+            <text wrapMode="none" fg={color.removed()}>{` -${counts().del}`}</text>
+          </Show>
+        </box>
+      )
+    }
+
+    /**
+     * Renders a folder tree with VS Code-style guide lines (│ ├─ └─) and collapsible folders. `prefix` is accumulated
+     * from ancestors: for each ancestor that is NOT the last sibling `"│ "`, otherwise `"  "`. Each level is 2 columns,
+     * the tightest spacing that keeps the tree readable. `isLast` is whether this folder is the last child of its parent.
+     */
+    function FileTreeView(props: {
+      tree: FileTree
+      sessionID: string
+      prefix?: string
+      depth?: number
+      isLast?: boolean
+      collapsed: Set<string>
+      toggle: (folderPath: string) => void
+    }) {
+      const depth = () => props.depth ?? 0
+      const prefix = () => props.prefix ?? ""
+      const hasContent = () => props.tree.files.length > 0 || props.tree.children.length > 0
+      const expanded = () => !props.collapsed.has(props.tree.path)
+
+      const folderRow = () => {
+        if (!props.tree.name) return undefined
+        const connector = depth() === 0 ? "" : props.isLast ? TREE_LAST : TREE_MID
+        return (
+          <box flexDirection="row" paddingLeft={2}>
+            <text fg={color.muted()} wrapMode="none">
+              {`${prefix()}${connector}${hasContent() ? (expanded() ? "▼ " : "▶ ") : "  "}${props.tree.name}/`}
+            </text>
+          </box>
+        )
+      }
+
+      return (
+        <box flexDirection="column">
+          <Show when={props.tree.name}>
+            <Clickable onClick={() => hasContent() && props.toggle(props.tree.path)}>
+              {folderRow()}
+            </Clickable>
+          </Show>
+          <Show when={expanded()}>
+            <For each={props.tree.files}>
+              {(file, index) => {
+                const fileIsLast =
+                  index() === props.tree.files.length - 1 && props.tree.children.length === 0
+                const connector = depth() === 0 ? "  " : fileIsLast ? TREE_LAST : TREE_MID
+                return (
+                  <box flexDirection="row" paddingLeft={2}>
+                    <text fg={color.muted()} wrapMode="none">{`${prefix()}${connector}`}</text>
+                    <FileRow file={file} sessionID={props.sessionID} />
+                  </box>
+                )
+              }}
+            </For>
+            <For each={props.tree.children}>
+              {(child, index) => {
+                const childIsLast = index() === props.tree.children.length - 1
+                const childPrefix = prefix() + (childIsLast ? TREE_END : TREE_CONTINUE)
+                return (
+                  <FileTreeView
+                    tree={child}
+                    sessionID={props.sessionID}
+                    prefix={childPrefix}
+                    depth={depth() + 1}
+                    isLast={childIsLast}
+                    collapsed={props.collapsed}
+                    toggle={props.toggle}
+                  />
+                )
+              }}
+            </For>
           </Show>
         </box>
       )
@@ -518,8 +644,18 @@ export default Plugin.define({
 
     function EditedFilesSection(props: { sessionID: string }) {
       const [files, setFiles] = createSignal<EditedFile[]>([])
+      const [collapsedFolders, setCollapsedFolders] = createSignal<Set<string>>(new Set())
       let seq = 0
       let timer: ReturnType<typeof setTimeout> | undefined
+
+      const toggleFolder = (folderPath: string) => {
+        setCollapsedFolders((prev) => {
+          const next = new Set(prev)
+          if (next.has(folderPath)) next.delete(folderPath)
+          else next.add(folderPath)
+          return next
+        })
+      }
 
       const refresh = () => {
         clearTimeout(timer)
@@ -562,9 +698,15 @@ export default Plugin.define({
 
       const inViewFiles = createMemo(() => inView(files(), props.sessionID))
       const reviewedCount = () => inViewFiles().filter((file) => file.reviewed).length
-      const scoped = createMemo(() => withoutHiddenReviewed(inViewFiles()))
+      const scoped = createMemo(() => withoutHiddenReviewed(inViewFiles(), props.sessionID))
       const sum = (files: EditedFile[]) =>
-        files.reduce((acc, f) => ({ add: acc.add + countsOf(f).add, del: acc.del + countsOf(f).del }), { add: 0, del: 0 })
+        files.reduce(
+          (acc, f) => {
+            const counts = countsOf(f, props.sessionID)
+            return { add: acc.add + counts.add, del: acc.del + counts.del }
+          },
+          { add: 0, del: 0 },
+        )
       const totals = () => sum(scoped())
       // The Workspace and Outside workspace headings show only when some files are outside; each can be collapsed.
       const outsideFiles = createMemo(() => scoped().filter((file) => workspacePath(file, props.sessionID) === undefined))
@@ -577,7 +719,6 @@ export default Plugin.define({
       // Rows go to workspace files first; collapsed files take none.
       const shown = createMemo(() => workspaceFirst(scoped(), props.sessionID).filter((file) => !isCollapsed(workspacePath(file, props.sessionID) === undefined)))
       const visible = createMemo(() => (prefs.showAll ? shown() : shown().slice(0, COMPACT_ROWS)))
-      const groups = createMemo(() => groupByDir(visible(), props.sessionID))
       const kinds = () => (split() ? [false, true] : [undefined])
       const hiddenOutside = () => outsideFiles().filter((file) => shown().includes(file) && !visible().includes(file)).length
 
@@ -602,8 +743,8 @@ export default Plugin.define({
                     <Show when={index() > 0}>
                       <text fg={color.muted()}>{" | "}</text>
                     </Show>
-                    <Clickable onClick={() => void setView(view)}>
-                      <text fg={prefs.baseline === view ? color.accent() : color.muted()}>
+                    <Clickable onClick={() => void setView(props.sessionID, view)}>
+                      <text fg={baselineOf(props.sessionID) === view ? color.accent() : color.muted()}>
                         {view === "session" ? "Session" : VIEW_LABELS[view]}
                       </text>
                     </Clickable>
@@ -616,8 +757,8 @@ export default Plugin.define({
                 <Show when={reviewedCount() > 0}>
                   <text fg={color.added()}>{"✓ "}</text>
                   <text fg={color.muted()}>{`${reviewedCount()} reviewed · `}</text>
-                  <Clickable onClick={() => void toggleShowReviewed()}>
-                    <text fg={color.accent()}>{prefs.showReviewed ? "Hide" : "Show"}</text>
+                  <Clickable onClick={() => void toggleShowReviewed(props.sessionID)}>
+                    <text fg={color.accent()}>{showReviewedOf(props.sessionID) ? "Hide" : "Show"}</text>
                   </Clickable>
                   <text fg={color.muted()}>{" · "}</text>
                 </Show>
@@ -630,7 +771,7 @@ export default Plugin.define({
               <text fg={color.muted()}>
                 {inViewFiles().length === 0
                   ? "  No files edited in the last turn"
-                  : prefs.baseline === "review"
+                  : baselineOf(props.sessionID) === "review"
                     ? "  No changes since review"
                     : "  All files reviewed"}
               </text>
@@ -646,16 +787,17 @@ export default Plugin.define({
                       <text fg={color.removed()}>{`-${sum(kindFiles(!!outside)).del}`}</text>
                     </Clickable>
                   </Show>
-                  <For each={groups().filter((group) => outside === undefined || group.outside === outside)}>
-                    {(group) => (
-                      <box flexDirection="column">
-                        <text fg={color.muted()}>
-                          {truncateLeft(group.dir === "." ? "./" : `${group.dir}/`, SIDEBAR_WIDTH - 2)}
-                        </text>
-                        <For each={group.files}>{(file) => <FileRow file={file} sessionID={props.sessionID} />}</For>
-                      </box>
+                  <FileTreeView
+                    tree={fileTree(
+                      visible().filter(
+                        (file) => outside === undefined || (workspacePath(file, props.sessionID) === undefined) === outside,
+                      ),
+                      props.sessionID,
                     )}
-                  </For>
+                    sessionID={props.sessionID}
+                    collapsed={collapsedFolders()}
+                    toggle={toggleFolder}
+                  />
                 </box>
               )}
             </For>
